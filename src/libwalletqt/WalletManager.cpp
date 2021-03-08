@@ -1,3 +1,31 @@
+// Copyright (c) 2014-2019, The Monero Project
+//
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without modification, are
+// permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice, this list of
+//    conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice, this list
+//    of conditions and the following disclaimer in the documentation and/or other
+//    materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its contributors may be
+//    used to endorse or promote products derived from this software without specific
+//    prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY
+// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
+// THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+// STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
+// THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 #include "WalletManager.h"
 #include "Wallet.h"
 #include "wallet/api/wallet2_api.h"
@@ -13,16 +41,49 @@
 #include <QMutexLocker>
 #include <QString>
 
-WalletManager * WalletManager::m_instance = nullptr;
+#include "qt/updater.h"
+#include "qt/ScopeGuard.h"
 
-WalletManager *WalletManager::instance()
+class WalletPassphraseListenerImpl : public  Monero::WalletListener, public PassphraseReceiver
 {
-    if (!m_instance) {
-        m_instance = new WalletManager;
-    }
+public:
+  WalletPassphraseListenerImpl(WalletManager * mgr): m_mgr(mgr), m_phelper(mgr) {}
 
-    return m_instance;
-}
+  virtual void moneySpent(const std::string &txId, uint64_t amount) override { (void)txId; (void)amount; };
+  virtual void moneyReceived(const std::string &txId, uint64_t amount) override { (void)txId; (void)amount; };
+  virtual void unconfirmedMoneyReceived(const std::string &txId, uint64_t amount) override { (void)txId; (void)amount; };
+  virtual void newBlock(uint64_t height) override { (void) height; };
+  virtual void updated() override {};
+  virtual void refreshed() override {};
+
+  virtual void onPassphraseEntered(const QString &passphrase, bool enter_on_device, bool entry_abort) override
+  {
+      qDebug() << __FUNCTION__;
+      m_phelper.onPassphraseEntered(passphrase, enter_on_device, entry_abort);
+  }
+
+  virtual Monero::optional<std::string> onDevicePassphraseRequest(bool & on_device) override
+  {
+      qDebug() << __FUNCTION__;
+      return m_phelper.onDevicePassphraseRequest(on_device);
+  }
+
+  virtual void onDeviceButtonRequest(uint64_t code) override
+  {
+      qDebug() << __FUNCTION__;
+      emit m_mgr->deviceButtonRequest(code);
+  }
+
+  virtual void onDeviceButtonPressed() override
+  {
+      qDebug() << __FUNCTION__;
+      emit m_mgr->deviceButtonPressed();
+  }
+
+private:
+  WalletManager * m_mgr;
+  PassphraseHelper m_phelper;
+};
 
 Wallet *WalletManager::createWallet(const QString &path, const QString &password,
                                     const QString &language, NetworkType::Type nettype, quint64 kdfRounds)
@@ -41,6 +102,15 @@ Wallet *WalletManager::createWallet(const QString &path, const QString &password
 Wallet *WalletManager::openWallet(const QString &path, const QString &password, NetworkType::Type nettype, quint64 kdfRounds)
 {
     QMutexLocker locker(&m_mutex);
+    WalletPassphraseListenerImpl tmpListener(this);
+    m_mutex_passphraseReceiver.lock();
+    m_passphraseReceiver = &tmpListener;
+    m_mutex_passphraseReceiver.unlock();
+    const auto cleanup = sg::make_scope_guard([this]() noexcept {
+        QMutexLocker passphrase_locker(&m_mutex_passphraseReceiver);
+        this->m_passphraseReceiver = nullptr;
+    });
+
     if (m_currentWallet) {
         qDebug() << "Closing open m_currentWallet" << m_currentWallet;
         delete m_currentWallet;
@@ -48,7 +118,9 @@ Wallet *WalletManager::openWallet(const QString &path, const QString &password, 
     qDebug("%s: opening wallet at %s, nettype = %d ",
            __PRETTY_FUNCTION__, qPrintable(path), nettype);
 
-    Monero::Wallet * w =  m_pimpl->openWallet(path.toStdString(), password.toStdString(), static_cast<Monero::NetworkType>(nettype), kdfRounds);
+    Monero::Wallet * w =  m_pimpl->openWallet(path.toStdString(), password.toStdString(), static_cast<Monero::NetworkType>(nettype), kdfRounds, &tmpListener);
+    w->setListener(nullptr);
+
     qDebug("%s: opened wallet: %s, status: %d", __PRETTY_FUNCTION__, w->address(0, 0).c_str(), w->status());
     m_currentWallet  = new Wallet(w);
 
@@ -62,28 +134,20 @@ Wallet *WalletManager::openWallet(const QString &path, const QString &password, 
 
 void WalletManager::openWalletAsync(const QString &path, const QString &password, NetworkType::Type nettype, quint64 kdfRounds)
 {
-    QFuture<Wallet*> future = QtConcurrent::run(this, &WalletManager::openWallet,
-                                        path, password, nettype, kdfRounds);
-    QFutureWatcher<Wallet*> * watcher = new QFutureWatcher<Wallet*>();
-
-    connect(watcher, &QFutureWatcher<Wallet*>::finished,
-            this, [this, watcher]() {
-        QFuture<Wallet*> future = watcher->future();
-        watcher->deleteLater();
-        emit walletOpened(future.result());
+    m_scheduler.run([this, path, password, nettype, kdfRounds] {
+        emit walletOpened(openWallet(path, password, nettype, kdfRounds));
     });
-    watcher->setFuture(future);
 }
 
 
-Wallet *WalletManager::recoveryWallet(const QString &path, const QString &memo, NetworkType::Type nettype, quint64 restoreHeight, quint64 kdfRounds)
+Wallet *WalletManager::recoveryWallet(const QString &path, const QString &seed, const QString &seed_offset, NetworkType::Type nettype, quint64 restoreHeight, quint64 kdfRounds)
 {
     QMutexLocker locker(&m_mutex);
     if (m_currentWallet) {
         qDebug() << "Closing open m_currentWallet" << m_currentWallet;
         delete m_currentWallet;
     }
-    Monero::Wallet * w = m_pimpl->recoveryWallet(path.toStdString(), "", memo.toStdString(), static_cast<Monero::NetworkType>(nettype), restoreHeight, kdfRounds);
+    Monero::Wallet * w = m_pimpl->recoveryWallet(path.toStdString(), "", seed.toStdString(), static_cast<Monero::NetworkType>(nettype), restoreHeight, kdfRounds, seed_offset.toStdString());
     m_currentWallet = new Wallet(w);
     return m_currentWallet;
 }
@@ -108,15 +172,42 @@ Wallet *WalletManager::createWalletFromDevice(const QString &path, const QString
                                               const QString &deviceName, quint64 restoreHeight, const QString &subaddressLookahead)
 {
     QMutexLocker locker(&m_mutex);
+    WalletPassphraseListenerImpl tmpListener(this);
+    m_mutex_passphraseReceiver.lock();
+    m_passphraseReceiver = &tmpListener;
+    m_mutex_passphraseReceiver.unlock();
+    const auto cleanup = sg::make_scope_guard([this]() noexcept {
+        QMutexLocker passphrase_locker(&m_mutex_passphraseReceiver);
+        this->m_passphraseReceiver = nullptr;
+    });
+
     if (m_currentWallet) {
         qDebug() << "Closing open m_currentWallet" << m_currentWallet;
         delete m_currentWallet;
         m_currentWallet = NULL;
     }
     Monero::Wallet * w = m_pimpl->createWalletFromDevice(path.toStdString(), password.toStdString(), static_cast<Monero::NetworkType>(nettype),
-                                                         deviceName.toStdString(), restoreHeight, subaddressLookahead.toStdString());
+                                                         deviceName.toStdString(), restoreHeight, subaddressLookahead.toStdString(), 1, &tmpListener);
+    w->setListener(nullptr);
+
     m_currentWallet = new Wallet(w);
+
+    // move wallet to the GUI thread. Otherwise it wont be emitting signals
+    if (m_currentWallet->thread() != qApp->thread()) {
+        m_currentWallet->moveToThread(qApp->thread());
+    }
+
     return m_currentWallet;
+}
+
+
+void WalletManager::createWalletFromDeviceAsync(const QString &path, const QString &password, NetworkType::Type nettype,
+                                                const QString &deviceName, quint64 restoreHeight, const QString &subaddressLookahead)
+{
+    m_scheduler.run([this, path, password, nettype, deviceName, restoreHeight, subaddressLookahead] {
+        Wallet *wallet = createWalletFromDevice(path, password, nettype, deviceName, restoreHeight, subaddressLookahead);
+        emit walletCreated(wallet);
+    });
 }
 
 QString WalletManager::closeWallet()
@@ -133,18 +224,11 @@ QString WalletManager::closeWallet()
     return result;
 }
 
-void WalletManager::closeWalletAsync()
+void WalletManager::closeWalletAsync(const QJSValue& callback)
 {
-    QFuture<QString> future = QtConcurrent::run(this, &WalletManager::closeWallet);
-    QFutureWatcher<QString> * watcher = new QFutureWatcher<QString>();
-
-    connect(watcher, &QFutureWatcher<QString>::finished,
-            this, [this, watcher]() {
-       QFuture<QString> future = watcher->future();
-       watcher->deleteLater();
-       emit walletClosed(future.result());
-    });
-    watcher->setFuture(future);
+    m_scheduler.run([this] {
+        return QJSValueList({closeWallet()});
+    }, callback);
 }
 
 bool WalletManager::walletExists(const QString &path) const
@@ -167,30 +251,17 @@ QString WalletManager::errorString() const
     return tr("Unknown error");
 }
 
-bool WalletManager::moveWallet(const QString &src, const QString &dst)
-{
-    return true;
-}
-
-
-QString WalletManager::walletLanguage(const QString &locale)
-{
-    return "English";
-}
-
 quint64 WalletManager::maximumAllowedAmount() const
 {
     return Monero::Wallet::maximumAllowedAmount();
 }
 
-QString WalletManager::maximumAllowedAmountAsSting() const
+QString WalletManager::maximumAllowedAmountAsString() const
 {
     return WalletManager::displayAmount(WalletManager::maximumAllowedAmount());
 }
 
-
-
-QString WalletManager::displayAmount(quint64 amount) const
+QString WalletManager::displayAmount(quint64 amount)
 {
     return QString::fromStdString(Monero::Wallet::displayAmount(amount));
 }
@@ -230,9 +301,11 @@ QString WalletManager::paymentIdFromAddress(const QString &address, NetworkType:
     return QString::fromStdString(Monero::Wallet::paymentIdFromAddress(address.toStdString(), static_cast<Monero::NetworkType>(nettype)));
 }
 
-void WalletManager::setDaemonAddress(const QString &address)
+void WalletManager::setDaemonAddressAsync(const QString &address)
 {
-    m_pimpl->setDaemonAddress(address.toStdString());
+    m_scheduler.run([this, address] {
+        m_pimpl->setDaemonAddress(address.toStdString());
+    });
 }
 
 bool WalletManager::connected() const
@@ -262,9 +335,22 @@ double WalletManager::miningHashRate() const
 
 bool WalletManager::isMining() const
 {
-    if(!m_currentWallet->connected())
-        return false;
+    {
+        QMutexLocker locker(&m_mutex);
+        if (m_currentWallet == nullptr || !m_currentWallet->connected())
+        {
+            return false;
+        }
+    }
+
     return m_pimpl->isMining();
+}
+
+void WalletManager::miningStatusAsync()
+{
+    m_scheduler.run([this] {
+        emit miningStatus(isMining());
+    });
 }
 
 bool WalletManager::startMining(const QString &address, quint32 threads, bool backgroundMining, bool ignoreBattery)
@@ -286,7 +372,7 @@ bool WalletManager::localDaemonSynced() const
 
 bool WalletManager::isDaemonLocal(const QString &daemon_address) const
 {
-    return Monero::Utils::isAddressLocal(daemon_address.toStdString());
+    return daemon_address.isEmpty() ? false : Monero::Utils::isAddressLocal(daemon_address.toStdString());
 }
 
 QString WalletManager::resolveOpenAlias(const QString &address) const
@@ -298,6 +384,7 @@ QString WalletManager::resolveOpenAlias(const QString &address) const
 }
 bool WalletManager::parse_uri(const QString &uri, QString &address, QString &payment_id, uint64_t &amount, QString &tx_description, QString &recipient_name, QVector<QString> &unknown_parameters, QString &error) const
 {
+    QMutexLocker locker(&m_mutex);
     if (m_currentWallet)
         return m_currentWallet->parse_uri(uri, address, payment_id, amount, tx_description, recipient_name, unknown_parameters, error);
     return false;
@@ -307,7 +394,7 @@ QVariantMap WalletManager::parse_uri_to_object(const QString &uri) const
 {
     QString address;
     QString payment_id;
-    uint64_t amount;
+    uint64_t amount = 0;
     QString tx_description;
     QString recipient_name;
     QVector<QString> unknown_parameters;
@@ -317,13 +404,27 @@ QVariantMap WalletManager::parse_uri_to_object(const QString &uri) const
     if (this->parse_uri(uri, address, payment_id, amount, tx_description, recipient_name, unknown_parameters, error)) {
         result.insert("address", address);
         result.insert("payment_id", payment_id);
-        result.insert("amount", this->displayAmount(amount));
+        result.insert("amount", amount > 0 ? displayAmount(amount) : "");
         result.insert("tx_description", tx_description);
         result.insert("recipient_name", recipient_name);
+
+        QVariantMap extra_parameters;
+        if (unknown_parameters.size() > 0)
+        {
+            for (const QString &item : unknown_parameters)
+            {
+                const auto parsed_item = item.splitRef("=");
+                if (parsed_item.size() == 2)
+                {
+                    extra_parameters.insert(parsed_item[0].toString(), parsed_item[1].toString());
+                }
+            }
+        }
+        result.insert("extra_parameters", extra_parameters);
     } else {
-        result.insert("error", error);
+        result.insert("error", !error.isEmpty() ? error : tr("Unknown error"));
     }
-    
+
     return result;
 }
 
@@ -367,26 +468,45 @@ double WalletManager::getPasswordStrength(const QString &password) const
 bool WalletManager::saveQrCode(const QString &code, const QString &path) const
 {
     QSize size;
-    // 240 <=> mainLayout.qrCodeSize (Receive.qml)
     return QRCodeImageProvider::genQrImage(code, &size).scaled(size.expandedTo(QSize(240, 240)), Qt::KeepAspectRatio).save(path, "PNG", 100);
 }
 
-void WalletManager::checkUpdatesAsync(const QString &software, const QString &subdir) const
+void WalletManager::checkUpdatesAsync(
+    const QString &software,
+    const QString &subdir,
+    const QString &buildTag,
+    const QString &version)
 {
-    QFuture<QString> future = QtConcurrent::run(this, &WalletManager::checkUpdates,
-                                        software, subdir);
-    QFutureWatcher<QString> * watcher = new QFutureWatcher<QString>();
-    connect(watcher, &QFutureWatcher<Wallet*>::finished,
-            this, [this, watcher]() {
-        QFuture<QString> future = watcher->future();
-        watcher->deleteLater();
-        qDebug() << "Checking for updates - done";
-        emit checkUpdatesComplete(future.result());
+    m_scheduler.run([this, software, subdir, buildTag, version] {
+        const auto updateInfo = Monero::WalletManager::checkUpdates(
+            software.toStdString(),
+            subdir.toStdString(),
+            buildTag.toStdString().c_str(),
+            version.toStdString().c_str());
+        if (!std::get<0>(updateInfo))
+        {
+            return;
+        }
+
+        const QString version = QString::fromStdString(std::get<1>(updateInfo));
+        const QByteArray hashFromDns = QByteArray::fromHex(QString::fromStdString(std::get<2>(updateInfo)).toUtf8());
+        const QString downloadUrl = QString::fromStdString(std::get<4>(updateInfo));
+
+        try
+        {
+            const QString binaryFilename = QUrl(downloadUrl).fileName();
+            QPair<QString, QString> signers;
+            const QString signedHash = Updater().fetchSignedHash(binaryFilename, hashFromDns, signers).toHex();
+
+            qInfo() << "Update found" << version << downloadUrl << "hash" << signedHash << "signed by" << signers;
+            emit checkUpdatesComplete(version, downloadUrl, signedHash, signers.first, signers.second);
+        }
+        catch (const std::exception &e)
+        {
+            qCritical() << "Failed to fetch and verify signed hash:" << e.what();
+        }
     });
-    watcher->setFuture(future);
 }
-
-
 
 QString WalletManager::checkUpdates(const QString &software, const QString &subdir) const
 {
@@ -415,7 +535,52 @@ bool WalletManager::clearWalletCache(const QString &wallet_path) const
     return walletCache.rename(newFileName);
 }
 
-WalletManager::WalletManager(QObject *parent) : QObject(parent)
+WalletManager::WalletManager(QObject *parent)
+    : QObject(parent)
+    , m_passphraseReceiver(nullptr)
+    , m_scheduler(this)
 {
     m_pimpl =  Monero::WalletManagerFactory::getWalletManager();
+}
+
+WalletManager::~WalletManager()
+{
+    m_scheduler.shutdownWaitForFinished();
+}
+
+void WalletManager::onWalletPassphraseNeeded(bool on_device)
+{
+    emit this->walletPassphraseNeeded(on_device);
+}
+
+void WalletManager::onPassphraseEntered(const QString &passphrase, bool enter_on_device, bool entry_abort)
+{
+    QMutexLocker locker(&m_mutex_passphraseReceiver);
+    if (m_passphraseReceiver != nullptr)
+    {
+        m_passphraseReceiver->onPassphraseEntered(passphrase, enter_on_device, entry_abort);
+    }
+}
+
+QString WalletManager::proxyAddress() const
+{
+    QMutexLocker locker(&m_proxyMutex);
+    return m_proxyAddress;
+}
+
+void WalletManager::setProxyAddress(QString address)
+{
+    m_scheduler.run([this, address] {
+        {
+            QMutexLocker locker(&m_proxyMutex);
+
+            if (!m_pimpl->setProxy(address.toStdString()))
+            {
+                qCritical() << "Failed to set proxy address" << address;
+            }
+
+            m_proxyAddress = std::move(address);
+        }
+        emit proxyAddressChanged();
+    });
 }

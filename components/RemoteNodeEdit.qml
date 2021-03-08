@@ -28,13 +28,14 @@
 
 import QtQuick.Controls 1.2
 import QtQuick.Controls.Styles 1.2
-import QtQuick 2.2
+import QtQuick 2.9
 import QtQuick.Layouts 1.1
 
+import "../js/Utils.js" as Utils
 import "../components" as MoneroComponents
 
 GridLayout {
-    columns: (isMobile) ? 1 : 2
+    columns: 2
     columnSpacing: 32
     id: root
     property alias daemonAddrText: daemonAddr.text
@@ -42,20 +43,26 @@ GridLayout {
     property alias daemonAddrLabelText: daemonAddr.labelText
     property alias daemonPortLabelText: daemonPort.labelText
 
+    property string initialAddress: ""
+    property var initialHostPort: initialAddress.match(/^(.*?)(?:\:?(\d*))$/)
+
     // TODO: LEGACY; remove these placeHolder variables when
     // the wizards get redesigned to the black-theme
     property string placeholderFontFamily: MoneroComponents.Style.fontRegular.name
     property bool placeholderFontBold: false
-    property int placeholderFontSize: 18 * scaleRatio
+    property int placeholderFontSize: 15
     property string placeholderColor: MoneroComponents.Style.defaultFontColor
     property real placeholderOpacity: 0.35
+    property int labelFontSize: 14
 
-    property string lineEditBorderColor: Qt.rgba(0, 0, 0, 0.15)
-    property string lineEditBackgroundColor: "white"
-    property string lineEditFontColor: "black"
-    property int lineEditFontSize: 18 * scaleRatio
-    property int labelFontSize: 16 * scaleRatio
-    property bool lineEditFontBold: true
+    property string lineEditBackgroundColor: "transparent"
+    property string lineEditBorderColor: MoneroComponents.Style.inputBorderColorInActive
+    property string lineEditFontColor: MoneroComponents.Style.defaultFontColor
+    property bool lineEditFontBold: false
+    property int lineEditFontSize: 15
+
+    // Author: David M. Syzdek https://github.com/syzdek https://gist.github.com/syzdek/6086792
+    readonly property var ipv6Regex: /^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe08:(:[0-9a-fA-F]{1,4}){2,2}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$/
 
     signal editingFinished()
     signal textChanged()
@@ -65,7 +72,14 @@ GridLayout {
     }
 
     function getAddress() {
-        return daemonAddr.text.trim() + ":" + daemonPort.text.trim()
+        var addr = daemonAddr.text.trim();
+        var port = daemonPort.text.trim();
+
+        // validation
+        if(addr === "" || addr.length < 2) return "";
+        if(!Utils.isNumeric(port)) return "";
+
+        return addr + ":" + port;
     }
 
     LineEdit {
@@ -83,8 +97,12 @@ GridLayout {
         fontColor: lineEditFontColor
         fontBold: lineEditFontBold
         fontSize: lineEditFontSize
-        onEditingFinished: root.editingFinished()
+        onEditingFinished: {
+            text = text.replace(ipv6Regex, "[$1]");
+            root.editingFinished();
+        }
         onTextChanged: root.textChanged()
+        text: initialHostPort[1]
     }
 
     LineEdit {
@@ -106,5 +124,6 @@ GridLayout {
 
         onEditingFinished: root.editingFinished()
         onTextChanged: root.textChanged()
+        text: initialHostPort[2]
     }
 }

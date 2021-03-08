@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2018, The Monero Project
+// Copyright (c) 2014-2019, The Monero Project
 //
 // All rights reserved.
 //
@@ -51,14 +51,12 @@ public:
     void setEnabled(bool enabled);
 
 public Q_SLOTS:
-    void processCode(int type, const QString &data);
     void processFrame(QVideoFrame);
 
 Q_SIGNALS:
     void enabledChanged();
 
-    void decoded(const QString &address, const QString &payment_id, const QString &amount, const QString &tx_description, const QString &recipient_name, const QVariantMap &extra_parameters);
-    void decode(int type, const QString &data);
+    void decoded(const QString &data);
     void notifyError(const QString &error, bool warning = false);
 
 protected:

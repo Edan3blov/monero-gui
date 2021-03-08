@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2015, The Monero Project
+// Copyright (c) 2014-2019, The Monero Project
 //
 // All rights reserved.
 //
@@ -26,7 +26,7 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import QtQuick 2.0
+import QtQuick 2.9
 import QtQuick.Layouts 1.1
 
 import "../components" as MoneroComponents
@@ -35,17 +35,24 @@ ColumnLayout {
     id: item
 
     Layout.fillWidth: true
-    Layout.preferredHeight: childrenRect.height
+
+    default property alias content: inlineButtons.children
 
     property alias text: input.text
     property alias labelText: inputLabel.text
     property alias labelButtonText: labelButton.text
     property alias placeholderText: placeholderLabel.text
 
+    property int inputPaddingLeft: 10
+    property int inputPaddingRight: 10
+    property int inputPaddingTop: 10
+    property int inputPaddingBottom: 10
+    property int inputRadius: 4
+
     property bool placeholderCenter: false
     property string placeholderFontFamily: MoneroComponents.Style.fontRegular.name
     property bool placeholderFontBold: false
-    property int placeholderFontSize: 18 * scaleRatio
+    property int placeholderFontSize: 18
     property string placeholderColor: MoneroComponents.Style.defaultFontColor
     property real placeholderOpacity: 0.35
 
@@ -64,21 +71,19 @@ ColumnLayout {
 
     property string labelFontColor: MoneroComponents.Style.defaultFontColor
     property bool labelFontBold: false
-    property int labelFontSize: 16 * scaleRatio
+    property int labelFontSize: 16
     property bool labelButtonVisible: false
 
-    property string fontColor: "white"
+    property string fontColor: MoneroComponents.Style.defaultFontColor
+    property string fontFamily: MoneroComponents.Style.fontRegular.name
     property bool fontBold: false
-    property int fontSize: 16 * scaleRatio
+    property int fontSize: 16
 
     property bool mouseSelection: true
     property alias readOnly: input.readOnly
     property bool copyButton: false
     property bool pasteButton: false
-    property var onPaste: function(clipboardText) {
-        item.text = clipboardText;
-    }
-    property bool showingHeader: true
+    property bool showingHeader: labelText != "" || copyButton || pasteButton
     property var wrapMode: Text.NoWrap
     property alias addressValidation: input.addressValidation
     property string backgroundColor: "" // mock
@@ -87,15 +92,17 @@ ColumnLayout {
     signal inputLabelLinkActivated();
     signal editingFinished();
 
+    onActiveFocusChanged: activeFocus && input.forceActiveFocus()
+
     spacing: 0
     Rectangle {
         id: inputLabelRect
         color: "transparent"
         Layout.fillWidth: true
-        height: (inputLabel.height + 10) * scaleRatio
+        height: (inputLabel.height + 10)
         visible: showingHeader ? true : false
 
-        Text {
+        MoneroComponents.TextPlain {
             id: inputLabel
             anchors.top: parent.top
             anchors.left: parent.left
@@ -115,7 +122,7 @@ ColumnLayout {
 
         RowLayout {
             anchors.right: parent.right
-            spacing: 16 * scaleRatio
+            spacing: 16
 
             MoneroComponents.LabelButton {
                 id: labelButton
@@ -126,7 +133,7 @@ ColumnLayout {
             MoneroComponents.LabelButton {
                 id: copyButtonId
                 visible: copyButton && input.text !== ""
-                text: qsTr("Copy")
+                text: qsTr("Copy") + translationManager.emptyString
                 onClicked: {
                     if (input.text.length > 0) {
                         console.log("Copied to clipboard");
@@ -138,8 +145,11 @@ ColumnLayout {
 
             MoneroComponents.LabelButton {
                 id: pasteButtonId
-                onClicked: item.onPaste(clipboard.text())
-                text: qsTr("Paste")
+                onClicked: {
+                    input.clear();
+                    input.paste();
+                }
+                text: qsTr("Paste") + translationManager.emptyString
                 visible: pasteButton
             }
         }
@@ -149,11 +159,18 @@ ColumnLayout {
         id: input
         readOnly: false
         addressValidation: false
-        anchors.top: item.showingHeader ? inputLabelRect.bottom : item.top
+        KeyNavigation.backtab: item.KeyNavigation.backtab
+        KeyNavigation.priority: KeyNavigation.BeforeItem
+        KeyNavigation.tab: item.KeyNavigation.tab
         Layout.fillWidth: true
-        topPadding: item.showingHeader ? 10 * scaleRatio : 0
-        bottomPadding: 10 * scaleRatio
+
+        leftPadding: item.inputPaddingLeft
+        rightPadding: (inlineButtons.width > 0 ? inlineButtons.width + inlineButtons.spacing : 0) + inputPaddingRight
+        topPadding: item.inputPaddingTop
+        bottomPadding: item.inputPaddingBottom
+
         wrapMode: item.wrapMode
+        font.family: item.fontFamily
         fontSize: item.fontSize
         fontBold: item.fontBold
         fontColor: item.fontColor
@@ -161,12 +178,12 @@ ColumnLayout {
         onEditingFinished: item.editingFinished()
         error: item.error
 
-        Text {
+        MoneroComponents.TextPlain {
             id: placeholderLabel
             visible: input.text ? false : true
             anchors.verticalCenter: parent.verticalCenter
             anchors.left: parent.left
-            anchors.leftMargin: 10 * scaleRatio
+            anchors.leftMargin: 10
             opacity: item.placeholderOpacity
             color: item.placeholderColor
             font.family: item.placeholderFontFamily
@@ -180,9 +197,17 @@ ColumnLayout {
             color: "transparent"
             border.width: 1
             border.color: item.borderColor
-            radius: 4
+            radius: item.inputRadius
             anchors.fill: parent
             visible: !item.borderDisabled
+        }
+
+        RowLayout {
+            id: inlineButtons
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.right: parent.right
+            anchors.rightMargin: inputPaddingRight
+            spacing: 4
         }
     }
 }

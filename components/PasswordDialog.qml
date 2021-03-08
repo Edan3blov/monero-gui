@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2018, The Monero Project
+// Copyright (c) 2014-2019, The Monero Project
 //
 // All rights reserved.
 //
@@ -26,40 +26,78 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import QtQuick 2.7
+import QtQuick 2.9
 import QtQuick.Controls 2.0
 import QtQuick.Dialogs 1.2
 import QtQuick.Layouts 1.1
 import QtQuick.Controls.Styles 1.4
 import QtQuick.Window 2.0
+import FontAwesome 1.0
 
-import "../components" as MoneroComponents
+import "." as MoneroComponents
+import "effects/" as MoneroEffects
+import "../js/Utils.js" as Utils
 
 Item {
     id: root
     visible: false
-    z: parent.z + 2
 
-    property alias password: passwordInput.text
+    property alias password: passwordInput1.text
     property string walletName
+    property var okButtonText
+    property string okButtonIcon
     property string errorText
+    property bool passwordDialogMode
+    property bool passphraseDialogMode
+    property bool newPasswordDialogMode
 
     // same signals as Dialog has
     signal accepted()
+    signal acceptedNewPassword()
+    signal acceptedPassphrase()
     signal rejected()
+    signal rejectedNewPassword()
+    signal rejectedPassphrase()
     signal closeCallback()
 
-    function open(walletName, errorText) {
-        inactiveOverlay.visible = true // draw appwindow inactive
+    function _openInit(walletName, errorText) {
+        capsLockTextLabel.visible = oshelper.isCapsLock();
+        passwordInput1.reset();
+        passwordInput2.reset();
+        if(!appWindow.currentWallet || appWindow.active)
+            passwordInput1.input.forceActiveFocus();
         root.walletName = walletName ? walletName : ""
-        root.errorText = errorText ? errorText : "";
+        errorTextLabel.text = errorText ? errorText : "";
         leftPanel.enabled = false
         middlePanel.enabled = false
-        titleBar.enabled = false
-        show()
+        wizard.enabled = false
+        titleBar.state = "essentials"
         root.visible = true;
-        passwordInput.forceActiveFocus();
-        passwordInput.text = ""
+        appWindow.hideBalanceForced = true;
+        appWindow.updateBalance();
+    }
+
+    function open(walletName, errorText, okButtonText, okButtonIcon) {
+        passwordDialogMode = true;
+        passphraseDialogMode = false;
+        newPasswordDialogMode = false;
+        root.okButtonText = okButtonText;
+        root.okButtonIcon = okButtonIcon ? okButtonIcon : "";
+        _openInit(walletName, errorText);
+    }
+
+    function openPassphraseDialog() {
+        passwordDialogMode = false;
+        passphraseDialogMode = true;
+        newPasswordDialogMode = false;
+        _openInit("", "");
+    }
+
+    function openNewPasswordDialog() {
+        passwordDialogMode = false;
+        passphraseDialogMode = false;
+        newPasswordDialogMode = true;
+        _openInit("", "");
     }
 
     function showError(errorText) {
@@ -67,127 +105,197 @@ Item {
     }
 
     function close() {
-        inactiveOverlay.visible = false
         leftPanel.enabled = true
         middlePanel.enabled = true
-        titleBar.enabled = true
+        wizard.enabled = true
+        titleBar.state = "default"
+
         root.visible = false;
+        appWindow.hideBalanceForced = false;
+        appWindow.updateBalance();
         closeCallback();
     }
 
+    function onOk() {
+        if (!passwordDialogMode && passwordInput1.text !== passwordInput2.text) {
+            return;
+        }
+        root.close()
+        if (passwordDialogMode) {
+            root.accepted()
+        } else if (newPasswordDialogMode) {
+            root.acceptedNewPassword()
+        } else if (passphraseDialogMode) {
+            root.acceptedPassphrase()
+        }
+    }
+
+    function onCancel() {
+        root.close()
+        if (passwordDialogMode) {
+            root.rejected()
+        } else if (newPasswordDialogMode) {
+            root.rejectedNewPassword()
+        } else if (passphraseDialogMode) {
+            root.rejectedPassphrase()
+        }
+    }
+
     ColumnLayout {
-        z: inactiveOverlay.z + 1
         id: mainLayout
         spacing: 10
-        anchors { fill: parent; margins: 35 * scaleRatio }
+        anchors { fill: parent; margins: 35 }
 
         ColumnLayout {
             id: column
 
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignHCenter
-            Layout.maximumWidth: 400 * scaleRatio
+            Layout.maximumWidth: 400
 
             Label {
-                text: root.walletName.length > 0 ? qsTr("Please enter wallet password for: ") + root.walletName : qsTr("Please enter wallet password")
-                anchors.left: parent.left
+                text: {
+                    if (newPasswordDialogMode) {
+                        return qsTr("Please enter new wallet password") + translationManager.emptyString;
+                    } else {
+                        var device = passwordDialogMode ? qsTr("wallet password") : qsTr("wallet device passphrase");
+                        return (root.walletName.length > 0 ? qsTr("Please enter %1 for: ").arg(device) + root.walletName : qsTr("Please enter %1").arg(device)) + translationManager.emptyString;
+                    }
+                }
                 Layout.fillWidth: true
 
-                font.pixelSize: 16 * scaleRatio
+                font.pixelSize: 16
                 font.family: MoneroComponents.Style.fontLight.name
 
                 color: MoneroComponents.Style.defaultFontColor
             }
 
             Label {
-                text: root.errorText
-                visible: root.errorText
+                text: qsTr("Warning: passphrase entry on host is a security risk as it can be captured by malware. It is advised to prefer device-based passphrase entry.") + translationManager.emptyString
+                visible: passphraseDialogMode
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
 
-                anchors.left: parent.left
+                font.pixelSize: 14
+                font.family: MoneroComponents.Style.fontLight.name
+
+                color: MoneroComponents.Style.warningColor
+            }
+
+            Label {
+                id: errorTextLabel
+                visible: root.errorText || text !== ""
                 color: MoneroComponents.Style.errorColor
-                font.pixelSize: 16 * scaleRatio
-                font.family: MoneroComponents.Style.fontLight.name                
+                font.pixelSize: 16
+                font.family: MoneroComponents.Style.fontLight.name
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
             }
 
-            TextField {
-                id : passwordInput
+            Label {
+                id: capsLockTextLabel
+                visible: false
+                color: MoneroComponents.Style.errorColor
+                font.pixelSize: 16
+                font.family: MoneroComponents.Style.fontLight.name
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: qsTr("CAPSLOCKS IS ON.") + translationManager.emptyString;
+            }
+
+            MoneroComponents.LineEdit {
+                id: passwordInput1
+                password: true
                 Layout.topMargin: 6
                 Layout.fillWidth: true
-                anchors.left: parent.left
-                horizontalAlignment: TextInput.AlignLeft
-                verticalAlignment: TextInput.AlignVCenter
-                font.family: MoneroComponents.Style.fontLight.name
-                font.pixelSize: 24 * scaleRatio
-                echoMode: TextInput.Password
-                KeyNavigation.tab: okButton
-                bottomPadding: 10
-                leftPadding: 10
-                topPadding: 10
-                color: MoneroComponents.Style.defaultFontColor
-                selectionColor: MoneroComponents.Style.dimmedFontColor
-                selectedTextColor: MoneroComponents.Style.defaultFontColor
-
-                background: Rectangle {
-                    radius: 2
-                    border.color: Qt.rgba(255, 255, 255, 0.35)
-                    border.width: 1
-                    color: "black"
-
-                    Image {
-                        width: 12
-                        height: 16
-                        source: "../images/lockIcon.png"
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.right: parent.right
-                        anchors.rightMargin: 20
+                KeyNavigation.tab: {
+                    if (passwordDialogMode) {
+                        return okButton
+                    } else {
+                        return passwordInput2
                     }
                 }
+                onTextChanged: capsLockTextLabel.visible = oshelper.isCapsLock();
 
                 Keys.enabled: root.visible
-                Keys.onReturnPressed: {
-                    root.close()
-                    root.accepted()
+                Keys.onEnterPressed: root.onOk()
+                Keys.onReturnPressed: root.onOk()
+                Keys.onEscapePressed: root.onCancel()
+            }
 
-                }
-                Keys.onEscapePressed: {
-                    root.close()
-                    root.rejected()
+            // padding
+            Rectangle {
+                visible: !passwordDialogMode
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignHCenter
+                height: 10
+                opacity: 0
+                color: "black"
+            }
 
-                }
+            Label {
+                visible: !passwordDialogMode
+                text: newPasswordDialogMode ? qsTr("Please confirm new password") : qsTr("Please confirm wallet device passphrase") + translationManager.emptyString
+                Layout.fillWidth: true
+
+                font.pixelSize: 16
+                font.family: MoneroComponents.Style.fontLight.name
+
+                color: MoneroComponents.Style.defaultFontColor
+            }
+
+            MoneroComponents.LineEdit {
+                id: passwordInput2
+                passwordLinked: passwordInput1
+                visible: !passwordDialogMode
+                Layout.topMargin: 6
+                Layout.fillWidth: true
+                KeyNavigation.tab: okButton
+                onTextChanged: capsLockTextLabel.visible = oshelper.isCapsLock();
+
+                Keys.enabled: root.visible
+                Keys.onEnterPressed: root.onOk()
+                Keys.onReturnPressed: root.onOk()
+                Keys.onEscapePressed: root.onCancel()
+            }
+
+            // padding
+            Rectangle {
+                visible: !passwordDialogMode
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignHCenter
+                height: 10
+                opacity: 0
+                color: "black"
             }
 
             // Ok/Cancel buttons
             RowLayout {
                 id: buttons
-                spacing: 16 * scaleRatio
+                spacing: 16
                 Layout.topMargin: 16
                 Layout.alignment: Qt.AlignRight
 
                 MoneroComponents.StandardButton {
                     id: cancelButton
+                    primary: false
                     small: true
                     text: qsTr("Cancel") + translationManager.emptyString
-                    KeyNavigation.tab: passwordInput
-                    onClicked: {
-                        root.close()
-                        root.rejected()
-                    }
+                    KeyNavigation.tab: passwordInput1
+                    onClicked: onCancel()
                 }
 
                 MoneroComponents.StandardButton {
                     id: okButton
+                    fontAwesomeIcon: true
+                    rightIcon: okButtonIcon
                     small: true
-                    text: qsTr("Continue")
+                    text: okButtonText ? okButtonText : qsTr("Ok") + translationManager.emptyString
                     KeyNavigation.tab: cancelButton
-                    onClicked: {
-                        root.close()
-                        root.accepted()
-                    }
+                    enabled: (passwordDialogMode == true) ? true : passwordInput1.text === passwordInput2.text
+                    onClicked: onOk()
                 }
             }
-
         }
     }
 }
