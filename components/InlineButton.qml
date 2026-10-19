@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2015, The Monero Project
+// Copyright (c) 2014-2024, The Monero Project
 //
 // All rights reserved.
 //
@@ -26,22 +26,35 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import QtQuick 2.0
-import QtQuick.Layouts 1.1
+import QtQuick
+import QtQuick.Layouts
 
-import "../components" as MoneroComponents
+
+import FontAwesome
+
+import "." as MoneroComponents
+import "./effects/" as MoneroEffects
+
+import QtQuick.Effects
 
 Item {
     id: inlineButton
-    height: rect.height * scaleRatio
-    property string shadowPressedColor: "#B32D00"
-    property string shadowReleasedColor: "#FF4304"
-    property string pressedColor: "#FF4304"
-    property string releasedColor: "#FF6C3C"
-    property string icon: ""
-    property string textColor: "#FFFFFF"
-    property int fontSize: 12 * scaleRatio
+
+    property bool small: false
+    property string textColor: MoneroComponents.Style.inlineButtonTextColor
     property alias text: inlineText.text
+    property alias fontPixelSize: inlineText.font.pixelSize
+    property string fontFamily: MoneroComponents.Style.fontBold.name
+    property string fontStyleName: ""
+    property bool isFontAwesomeIcon: fontStyleName === "Solid" || fontFamily === FontAwesome.fontFamily || fontFamily === FontAwesome.fontFamilySolid
+    property alias buttonColor: rect.color
+    property alias tooltip: tooltip.text
+    property alias tooltipLeft: tooltip.tooltipLeft
+    property alias tooltipBottom: tooltip.tooltipBottom
+
+    height: isFontAwesomeIcon ? 30 : 24
+    width: isFontAwesomeIcon ? height : inlineText.width + 16
+
     signal clicked()
 
     function doClick() {
@@ -52,23 +65,32 @@ Item {
 
     Rectangle{
         id: rect
-        color: MoneroComponents.Style.buttonBackgroundColorDisabled
-        border.color: "black"
-        height: 28 * scaleRatio
-        width: inlineText.width + 22 * scaleRatio
+        anchors.fill: parent
+        color: buttonArea.containsMouse ? MoneroComponents.Style.buttonInlineBackgroundColorHover : MoneroComponents.Style.buttonInlineBackgroundColor
         radius: 4
+        border.width: parent.focus && parent.enabled ? 1 : 0
 
-        anchors.top: parent.top
-        anchors.right: parent.right
-
-        Text {
+        MoneroComponents.TextPlain {
             id: inlineText
-            font.family: MoneroComponents.Style.fontBold.name
-            font.bold: true
-            font.pixelSize: 16 * scaleRatio
-            color: "black"
+            font.family: inlineButton.fontStyleName === "Solid" ? FontAwesome.fontFamilySolid : inlineButton.fontFamily
+            font.styleName: inlineButton.fontStyleName
+            font.bold: !inlineButton.isFontAwesomeIcon
+            font.pixelSize: inlineButton.isFontAwesomeIcon ? 22 : inlineButton.small ? 14 : 16
+            color: inlineButton.textColor
             anchors.verticalCenter: parent.verticalCenter
             anchors.horizontalCenter: parent.horizontalCenter
+            themeTransition: false
+
+            MoneroEffects.ColorTransition {
+                targetObj: inlineText
+                blackColor: MoneroComponents.Style._b_inlineButtonTextColor
+                whiteColor: MoneroComponents.Style._w_inlineButtonTextColor
+            }
+        }
+
+        MoneroComponents.Tooltip {
+            id: tooltip
+            anchors.fill: parent
         }
 
         MouseArea {
@@ -76,18 +98,33 @@ Item {
             cursorShape: rect.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
             hoverEnabled: true
             anchors.fill: parent
-            onClicked: doClick()
+            onClicked: {
+                tooltip.text ? tooltip.tooltipPopup.close() : ""
+                doClick()
+            }
             onEntered: {
-                rect.color = "#707070";
-                rect.opacity = 0.8;
+                tooltip.text ? tooltip.tooltipPopup.open() : ""
             }
             onExited: {
-                rect.opacity = 1.0;
-                rect.color = "#808080";
+                tooltip.text ? tooltip.tooltipPopup.close() : ""
             }
         }
     }
 
+    MultiEffect {
+        visible: !MoneroComponents.Style.blackTheme && GraphicsInfo.api !== GraphicsInfo.Software
+        anchors.fill: rect
+        source: rect
+        shadowEnabled: true
+        shadowHorizontalOffset: 2
+        shadowVerticalOffset: 2
+        shadowBlur: 0.875
+        blurMax: 16
+        shadowColor: "#1B000000"
+    }
+
+    Keys.enabled: inlineButton.visible
     Keys.onSpacePressed: doClick()
+    Keys.onEnterPressed: doClick()
     Keys.onReturnPressed: doClick()
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2018, The Monero Project
+// Copyright (c) 2014-2024, The Monero Project
 //
 // All rights reserved.
 //
@@ -26,12 +26,10 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import QtQuick 2.0
-import QtQuick.Controls 1.4
-import QtQuick.Dialogs 1.2
-import QtQuick.Layouts 1.1
-import QtQuick.Controls.Styles 1.4
-import QtQuick.Window 2.0
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Window
+import moneroComponents.Wallet 1.0
 
 import "../components" as MoneroComponents
 
@@ -44,14 +42,14 @@ Window {
     signal started();
 
     function open() {
-        show()
         countDown = 10;
-        timer.start();
+        timer.restart();
     }
 
     // TODO: implement without hardcoding sizes
     width: 480
     height: 200
+    color: MoneroComponents.Style.middlePanelBackgroundColor
 
     // Make window draggable
     MouseArea {
@@ -78,9 +76,19 @@ Window {
                 running: false;
                 repeat: true
                 onTriggered: {
+                    if (currentWallet.connected() == Wallet.ConnectionStatus_Connected) {
+                        timer.stop();
+                        root.close();
+                        return;
+                    }
+
+                    if (!root.visible) {
+                        root.show();
+                    }
+
                     countDown--;
-                    if(countDown < 0){
-                        running = false;
+                    if (countDown < 0) {
+                        timer.stop();
                         // Start daemon
                         root.close()
                         appWindow.startDaemon(persistentSettings.daemonFlags);
@@ -89,12 +97,14 @@ Window {
                 }
             }
 
-            Text {
-                text: qsTr("Starting local node in %1 seconds").arg(countDown);
+            MoneroComponents.TextPlain {
+                text: qsTr("Starting local node in %1 seconds").arg(countDown) + translationManager.emptyString;
                 font.pixelSize: 18
                 Layout.alignment: Qt.AlignHCenter
                 Layout.fillWidth: true
                 horizontalAlignment: Text.AlignHCenter
+                themeTransition: false
+                color: MoneroComponents.Style.defaultFontColor
             }
 
         }
@@ -108,7 +118,7 @@ Window {
                 id: okButton
                 visible:false
                 fontSize: 14
-                text: qsTr("Start daemon (%1)").arg(countDown)
+                text: qsTr("Start daemon (%1)").arg(countDown) + translationManager.emptyString
                 KeyNavigation.tab: cancelButton
                 onClicked: {
                     timer.stop();
@@ -121,7 +131,7 @@ Window {
             MoneroComponents.StandardButton {
                 id: cancelButton
                 fontSize: 14
-                text: qsTr("Use custom settings")
+                text: qsTr("Use custom settings") + translationManager.emptyString
 
                 onClicked: {
                     timer.stop();

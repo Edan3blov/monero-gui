@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2018, The Monero Project
+// Copyright (c) 2014-2024, The Monero Project
 // 
 // All rights reserved.
 // 
@@ -26,33 +26,39 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import QtQuick 2.5
-import QtQuick.Layouts 1.1
+import QtQuick
+import QtQuick.Layouts
 
 import "../components" as MoneroComponents
 
 Item {
     id: item
     property alias text: label.text
+    property alias tooltip: label.tooltip
+    property alias tooltipIconVisible: label.tooltipIconVisible
     property alias color: label.color
-    property alias textFormat: label.textFormat
+    property alias labelMouseArea: labelMouseArea
+    property int textFormat: Text.PlainText
     property string tipText: ""
-    property int fontSize: 16 * scaleRatio
+    property int fontSize: 16
     property bool fontBold: false
     property string fontColor: MoneroComponents.Style.defaultFontColor
     property string fontFamily: ""
     property alias wrapMode: label.wrapMode
     property alias horizontalAlignment: label.horizontalAlignment
-    property alias hoveredLink: label.hoveredLink
+    property alias elide: label.elide
+    property alias textWidth: label.width
+    property alias styleName: label.font.styleName
+    property alias themeTransition: label.themeTransition
     signal linkActivated()
-    height: label.height * scaleRatio
-    width: label.width * scaleRatio
-    Layout.topMargin: 10 * scaleRatio
+    height: label.height
+    width: label.width
+    Layout.topMargin: 10
 
-    Text {
+    MoneroComponents.TextPlain {
         id: label
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 2 * scaleRatio
+        anchors.bottomMargin: 2
         anchors.left: parent.left
         font.family: {
             if(fontFamily){
@@ -65,5 +71,15 @@ Item {
         font.bold: fontBold
         color: fontColor
         onLinkActivated: item.linkActivated()
+        textFormat: parent.textFormat
+        MouseArea {
+            id: labelMouseArea
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+            cursorShape: parent.hoveredLink || (tooltip && !tooltipIconVisible) ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onEntered: tooltip && !tooltipIconVisible ? parent.tooltipPopup.open() : undefined
+            onExited: tooltip && !tooltipIconVisible ? parent.tooltipPopup.close() : undefined
+        }
     }
 }

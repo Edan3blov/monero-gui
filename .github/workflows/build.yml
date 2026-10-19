@@ -1,0 +1,196 @@
+name: ci/gh-actions/gui
+
+on: [push, pull_request]
+
+env:
+  FREE_DISKSPACE: |
+    sudo rm -rf /usr/local/.ghcup /usr/share/dotnet /usr/share/swift /usr/share/miniconda /usr/local/lib/android /opt/hostedtoolcache
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+    - name: install dependencies
+      run: HOMEBREW_NO_AUTO_UPDATE=1 brew install boost hidapi ninja openssl zmq libsodium unbound protobuf qt pkg-config
+    - name: build
+      run: DEV_MODE=ON QML_TESTS=ON make release
+    - name: test qml
+      run: build/release/bin/monero-wallet-gui.app/Contents/MacOS/monero-wallet-gui --test-qml
+
+  build-ubuntu:
+    runs-on: ubuntu-26.04
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+    - name: remove bundled boost
+      run: sudo rm -rf /usr/local/share/boost
+    - name: set apt conf
+      run: |
+        echo "Acquire::Retries \"3\";" | sudo tee -a /etc/apt/apt.conf.d/80-custom
+        echo "Acquire::http::Timeout \"120\";" | sudo tee -a /etc/apt/apt.conf.d/80-custom
+        echo "Acquire::ftp::Timeout \"120\";" | sudo tee -a /etc/apt/apt.conf.d/80-custom
+    - name: update apt
+      run: sudo apt update
+    - name: install monero dependencies
+      run: sudo apt -y install build-essential cmake ninja-build libboost-all-dev libunbound-dev graphviz doxygen pkg-config libssl-dev libzmq3-dev libsodium-dev libhidapi-dev libnorm-dev libusb-1.0-0-dev libpgm-dev libprotobuf-dev protobuf-compiler libgcrypt20-dev qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools qml6-module-qtcore qml6-module-qtqml qml6-module-qtqml-models qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-dialogs qml6-module-qtquick-effects qml6-module-qtquick-layouts qml6-module-qtquick-shapes qml6-module-qtquick-window qml6-module-qt-labs-folderlistmodel qml6-module-qt-labs-platform qml6-module-qttest
+    - name: build
+      run: DEV_MODE=ON QML_TESTS=ON make release
+    - name: test qml
+      env:
+        QT_QPA_PLATFORM: offscreen
+        QT_QUICK_BACKEND: software
+      run: build/release/bin/monero-wallet-gui --test-qml
+
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+    - uses: eine/setup-msys2@v2
+      with:
+        msystem: ucrt64
+        update: true
+        install: make
+        pacboy: toolchain:p pcre:p cmake:p ninja:p boost:p openssl:p zeromq:p libsodium:p hidapi:p protobuf:p libusb:p unbound:p git qt6-base:p qt6-declarative:p qt6-svg:p qt6-tools:p libgcrypt:p rust:p
+    - name: add qmlimportscanner.exe
+      run: cp -f "$MSYSTEM_PREFIX/share/qt6/bin/qmlimportscanner.exe" "$MSYSTEM_PREFIX/bin/qmlimportscanner.exe"
+    - name: build
+      run: DEV_MODE=ON QML_TESTS=ON make release-win64
+    - name: deploy
+      run: cmake --build . --target deploy
+      working-directory: build/release
+    - name: test qml
+      run: build/release/bin/monero-wallet-gui --test-qml -o test.log,txt || { rc=$?; cat test.log; exit "$rc"; }
+
+  macos-bundle:
+    name: macOS ${{ matrix.arch }} bundle
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            archive_name: monero-wallet-gui-macos-armv8.tar.gz
+            arch: ARM
+          - runner: macos-15-intel
+            archive_name: monero-wallet-gui-macos-x64.tar.gz
+            arch: Intel
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: select Xcode 16.2
+        if: matrix.arch == 'ARM'
+        run: sudo xcode-select --switch /Applications/Xcode_16.2.app/Contents/Developer
+      - name: install dependencies
+        run: HOMEBREW_NO_AUTO_UPDATE=1 brew install boost hidapi libsodium ninja openssl pkg-config protobuf unbound zeromq aria2
+      - name: download Qt
+        run: mkdir qt6 && cd qt6 && python3 ../monero-gui/.github/qt_helper.py mac_x64 desktop 6.12.0 clang_64 2db37b3a5f2da2ea0fc922e1d476b9eb326cd9ad43e539519e4281f2f9ff8888
+        working-directory: ../
+      - name: configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -D CMAKE_PREFIX_PATH="/Users/runner/work/monero-gui/qt6/"
+          -D CMAKE_OSX_DEPLOYMENT_TARGET="14.4"
+          -D ARCH=default
+      - name: build
+        run: cmake --build build
+      - name: deploy
+        run: cmake --build build --target deploy
+      - name: check qml startup
+        run: build/bin/monero-wallet-gui.app/Contents/MacOS/monero-wallet-gui --check-qml
+      - name: create archive
+        run: tar -C build/bin -czf "${{ matrix.archive_name }}" monero-wallet-gui.app
+      - uses: actions/upload-artifact@v7
+        with:
+          path: ${{ matrix.archive_name }}
+          archive: false
+
+  docker-linux-static:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+    - name: free up diskspace
+      run: ${{env.FREE_DISKSPACE}}
+    - name: prepare build environment
+      run: docker build --tag monero:build-env-linux --build-arg THREADS=4 --file Dockerfile.linux .
+    - name: build
+      run: docker run --rm -v /home/runner/work/monero-gui/monero-gui:/monero-gui -w /monero-gui monero:build-env-linux sh -c 'make depends root=/depends target=x86_64-linux-gnu tag=linux-x64'
+    - name: sha256sum
+      run: shasum -a256 /home/runner/work/monero-gui/monero-gui/build/x86_64-linux-gnu/release/bin/monero-wallet-gui
+    - name: install test dependencies
+      run: sudo apt -y install xvfb libopengl0 libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0
+    - name: check qml startup
+      run: xvfb-run -a /home/runner/work/monero-gui/monero-gui/build/x86_64-linux-gnu/release/bin/monero-wallet-gui --check-qml
+    - uses: actions/upload-artifact@v7
+      with:
+        name: ${{ github.job }}
+        path: |
+          /home/runner/work/monero-gui/monero-gui/build/x86_64-linux-gnu/release/bin/monero-wallet-gui
+          /home/runner/work/monero-gui/monero-gui/build/x86_64-linux-gnu/release/bin/monerod
+
+  docker-windows-static:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+    - name: free up diskspace
+      run: ${{env.FREE_DISKSPACE}}
+    - name: prepare build environment
+      run: docker build --tag monero:build-env-windows --build-arg THREADS=4 --file Dockerfile.windows .
+    - name: build
+      run: docker run --rm -v /home/runner/work/monero-gui/monero-gui:/monero-gui -w /monero-gui monero:build-env-windows sh -c 'make depends root=/depends target=x86_64-w64-mingw32 tag=win-x64'
+    - name: sha256sum
+      run: shasum -a256 /home/runner/work/monero-gui/monero-gui/build/x86_64-w64-mingw32/release/bin/monero-wallet-gui.exe
+    - uses: actions/upload-artifact@v7
+      with:
+        name: ${{ github.job }}
+        path: |
+          /home/runner/work/monero-gui/monero-gui/build/x86_64-w64-mingw32/release/bin/monero-wallet-gui.exe
+          /home/runner/work/monero-gui/monero-gui/build/x86_64-w64-mingw32/release/bin/monerod.exe
+
+  docker-android:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+    - name: free up diskspace
+      run: ${{env.FREE_DISKSPACE}}
+    - name: prepare build environment
+      run: docker build --tag monero:build-env-android --build-arg THREADS=4 --file Dockerfile.android .
+    - name: build
+      run: docker run --rm -v /home/runner/work/monero-gui/monero-gui:/monero-gui monero:build-env-android
+    - uses: actions/upload-artifact@v7
+      with:
+        name: ${{ github.job }}
+        path: /home/runner/work/monero-gui/monero-gui/build/Android/release/android-build/build/outputs/apk/release/android-build-release-unsigned.apk
+
+  source-archive:
+    runs-on: ubuntu-slim
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+    - name: archive
+      run: |
+        pip install git-archive-all
+        export VERSION="monero-gui-$(git describe)"
+        export OUTPUT="$VERSION.tar"
+        echo "OUTPUT=$OUTPUT" >> $GITHUB_ENV
+        /home/runner/.local/bin/git-archive-all --prefix "$VERSION/" --force-submodules "$OUTPUT"
+    - uses: actions/upload-artifact@v7
+      with:
+        name: ${{ env.OUTPUT }}
+        path: /home/runner/work/monero-gui/monero-gui/${{ env.OUTPUT }}

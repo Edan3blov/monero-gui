@@ -1,7 +1,36 @@
+// Copyright (c) 2014-2024, The Monero Project
+//
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without modification, are
+// permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice, this list of
+//    conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice, this list
+//    of conditions and the following disclaimer in the documentation and/or other
+//    materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its contributors may be
+//    used to endorse or promote products derived from this software without specific
+//    prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY
+// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
+// THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+// STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
+// THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 #include "TransactionHistorySortFilterModel.h"
 #include "TransactionHistoryModel.h"
 
 #include <QDebug>
+#include <QtGlobal>
 
 namespace {
     /**
@@ -42,6 +71,22 @@ TransactionHistorySortFilterModel::TransactionHistorySortFilterModel(QObject *pa
     setDynamicSortFilter(true);
 }
 
+void TransactionHistorySortFilterModel::beginRowFilterChange()
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 10, 0)
+    beginFilterChange();
+#endif
+}
+
+void TransactionHistorySortFilterModel::endRowFilterChange()
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 10, 0)
+    endFilterChange(QSortFilterProxyModel::Direction::Rows);
+#else
+    invalidateFilter();
+#endif
+}
+
 QString TransactionHistorySortFilterModel::searchFilter() const
 {
     return m_searchString;
@@ -50,9 +95,10 @@ QString TransactionHistorySortFilterModel::searchFilter() const
 void TransactionHistorySortFilterModel::setSearchFilter(const QString &arg)
 {
     if (searchFilter() != arg) {
+        beginRowFilterChange();
         m_searchString = arg;
+        endRowFilterChange();
         emit searchFilterChanged();
-        invalidateFilter();
     }
 }
 
@@ -64,9 +110,10 @@ QString TransactionHistorySortFilterModel::paymentIdFilter() const
 void TransactionHistorySortFilterModel::setPaymentIdFilter(const QString &arg)
 {
     if (paymentIdFilter() != arg) {
+        beginRowFilterChange();
         m_filterValues[TransactionHistoryModel::TransactionPaymentIdRole] = arg;
+        endRowFilterChange();
         emit paymentIdFilterChanged();
-        invalidateFilter();
     }
 }
 
@@ -78,9 +125,10 @@ QDate TransactionHistorySortFilterModel::dateFromFilter() const
 void TransactionHistorySortFilterModel::setDateFromFilter(const QDate &date)
 {
     if (date != dateFromFilter()) {
+        beginRowFilterChange();
         setScopeFilterValue(m_filterValues, TransactionHistoryModel::TransactionTimeStampRole, ScopeIndex::From, date);
+        endRowFilterChange();
         emit dateFromFilterChanged();
-        invalidateFilter();
     }
 }
 
@@ -92,9 +140,10 @@ QDate TransactionHistorySortFilterModel::dateToFilter() const
 void TransactionHistorySortFilterModel::setDateToFilter(const QDate &date)
 {
     if (date != dateToFilter()) {
+        beginRowFilterChange();
         setScopeFilterValue(m_filterValues, TransactionHistoryModel::TransactionTimeStampRole, ScopeIndex::To, date);
+        endRowFilterChange();
         emit dateToFilterChanged();
-        invalidateFilter();
     }
 }
 
@@ -106,9 +155,10 @@ double TransactionHistorySortFilterModel::amountFromFilter() const
 void TransactionHistorySortFilterModel::setAmountFromFilter(double value)
 {
     if (value != amountFromFilter()) {
+        beginRowFilterChange();
         setScopeFilterValue(m_filterValues, TransactionHistoryModel::TransactionAmountRole, ScopeIndex::From, value);
+        endRowFilterChange();
         emit amountFromFilterChanged();
-        invalidateFilter();
     }
 }
 
@@ -120,9 +170,10 @@ double TransactionHistorySortFilterModel::amountToFilter() const
 void TransactionHistorySortFilterModel::setAmountToFilter(double value)
 {
     if (value != amountToFilter()) {
+        beginRowFilterChange();
         setScopeFilterValue(m_filterValues, TransactionHistoryModel::TransactionAmountRole, ScopeIndex::To, value);
+        endRowFilterChange();
         emit amountToFilterChanged();
-        invalidateFilter();
     }
 }
 
@@ -134,9 +185,10 @@ int TransactionHistorySortFilterModel::directionFilter() const
 void TransactionHistorySortFilterModel::setDirectionFilter(int value)
 {
     if (value != directionFilter()) {
+        beginRowFilterChange();
         m_filterValues[TransactionHistoryModel::TransactionDirectionRole] = QVariant::fromValue(value);
+        endRowFilterChange();
         emit directionFilterChanged();
-        invalidateFilter();
     }
 }
 
@@ -176,9 +228,8 @@ bool TransactionHistorySortFilterModel::filterAcceptsRow(int source_row, const Q
                 break;
             case TransactionHistoryModel::TransactionTimeStampRole:
             {
-                QDateTime from = QDateTime(dateFromFilter());
-                QDateTime to   = QDateTime(dateToFilter());
-                to = to.addDays(1); // including upperbound
+                QDateTime from = dateFromFilter().startOfDay();
+                QDateTime to = dateToFilter().endOfDay();
                 QDateTime timestamp = data.toDateTime();
                 bool matchFrom = from.isNull() || timestamp.isNull() || timestamp >= from;
                 bool matchTo = to.isNull() || timestamp.isNull() || timestamp <= to;
@@ -236,6 +287,9 @@ bool TransactionHistorySortFilterModel::filterAcceptsRow(int source_row, const Q
     if (data.toString().contains(m_searchString))
         return true;
     data = sourceModel()->data(index, TransactionHistoryModel::TransactionTimeRole);
+    if (data.toString().contains(m_searchString))
+        return true;
+    data = sourceModel()->data(index, TransactionHistoryModel::TransactionDestinationsRole);
     if (data.toString().contains(m_searchString))
         return true;
 

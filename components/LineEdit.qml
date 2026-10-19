@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2018, The Monero Project
+// Copyright (c) 2014-2024, The Monero Project
 // 
 // All rights reserved.
 // 
@@ -26,64 +26,95 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import QtQuick 2.0
+import QtQuick
+import QtQuick.Layouts
+
+import FontAwesome
 
 import "../components" as MoneroComponents
 
-Item {
+ColumnLayout {
     id: item
+    Layout.fillWidth: true
+
+    default property alias content: inlineButtons.children
+
+    property alias input: input
+    property bool inputHasFocus: input.activeFocus
+    property bool tabNavigationEnabled: true
     property alias text: input.text
+
+    property int inputPaddingLeft: 10
+    property int inputPaddingRight: 10
+    property int inputPaddingTop: 10
+    property int inputPaddingBottom: 10
+    property int inputRadius: 4
+
+    property bool password: false
+    property bool passwordHidden: true
+    property var passwordLinked: null
 
     property alias placeholderText: placeholderLabel.text
     property bool placeholderCenter: false
     property string placeholderFontFamily: MoneroComponents.Style.fontRegular.name
     property bool placeholderFontBold: false
-    property int placeholderFontSize: 18 * scaleRatio
+    property int placeholderFontSize: 18
     property string placeholderColor: MoneroComponents.Style.defaultFontColor
     property real placeholderOpacity: 0.35
+    property real placeholderLeftMargin: {
+        if (placeholderCenter) {
+            return undefined;
+        } else {
+            return inputPaddingLeft;
+        }
+    }
 
     property alias acceptableInput: input.acceptableInput
     property alias validator: input.validator
     property alias readOnly : input.readOnly
     property alias cursorPosition: input.cursorPosition
-    property alias echoMode: input.echoMode
-    property alias inlineButton: inlineButtonId
-    property alias inlineButtonText: inlineButtonId.text
-    property alias inlineIcon: inlineIcon.visible
     property bool copyButton: false
+    property bool pasteButton: false
+    property alias copyButtonText: copyButtonId.text
+    property alias copyButtonEnabled: copyButtonId.enabled
 
     property bool borderDisabled: false
     property string borderColor: {
-        if(input.activeFocus){
+        if ((error && input.text !== "") || (errorWhenEmpty && input.text == "")) {
+            return MoneroComponents.Style.inputBorderColorInvalid;
+        } else if (input.activeFocus) {
             return MoneroComponents.Style.inputBorderColorActive;
         } else {
             return MoneroComponents.Style.inputBorderColorInActive;
         }
     }
 
-    property int fontSize: 18 * scaleRatio
+    property string fontFamily: MoneroComponents.Style.fontRegular.name
+    property int fontSize: 18
     property bool fontBold: false
     property alias fontColor: input.color
     property bool error: false
+    property bool errorWhenEmpty: false
     property alias labelText: inputLabel.text
     property alias labelColor: inputLabel.color
     property alias labelTextFormat: inputLabel.textFormat
     property string backgroundColor: "transparent"
     property string tipText: ""
-    property int labelFontSize: 16 * scaleRatio
+    property int labelFontSize: 16
     property bool labelFontBold: false
     property alias labelWrapMode: inputLabel.wrapMode
     property alias labelHorizontalAlignment: inputLabel.horizontalAlignment
     property bool showingHeader: inputLabel.text !== "" || copyButton
-    property int inputHeight: 42 * scaleRatio
+    property int inputHeight: 39
 
     signal labelLinkActivated(); // input label, rich text <a> signal
     signal editingFinished();
     signal accepted();
     signal textUpdated();
+    signal backtabPressed();
+    signal tabPressed();
 
-    height: showingHeader ? (inputLabel.height + inputItem.height + 2) * scaleRatio : 42 * scaleRatio
-
+    onActiveFocusChanged: activeFocus && input.forceActiveFocus()
     onTextUpdated: {
         // check to remove placeholder text when there is content
         if(item.isEmpty()){
@@ -103,65 +134,148 @@ Item {
         }
     }
 
-    Text {
-        id: inputLabel
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.topMargin: 2 * scaleRatio
-        font.family: MoneroComponents.Style.fontLight.name
-        font.pixelSize: labelFontSize
-        font.bold: labelFontBold
-        textFormat: Text.RichText
-        color: MoneroComponents.Style.defaultFontColor
-        onLinkActivated: item.labelLinkActivated()
+    function isPasswordHidden() {
+        if (password) {
+            return passwordHidden;
+        }
+        if (passwordLinked) {
+            return passwordLinked.passwordHidden;
+        }
+        return false;
+    }
 
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.NoButton
-            cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.ArrowCursor
+    function reset() {
+        text = "";
+        if (!passwordLinked) {
+            passwordHidden = true;
         }
     }
 
-    MoneroComponents.LabelButton {
-        id: copyButtonId
-        text: qsTr("Copy")
-        anchors.right: parent.right
-        onClicked: {
-            if (input.text.length > 0) {
-                console.log("Copied to clipboard");
-                clipboard.setText(input.text);
-                appWindow.showStatusMessage(qsTr("Copied to clipboard"), 3);
+    function passwordToggle() {
+        if (passwordLinked) {
+            passwordLinked.passwordHidden = !passwordLinked.passwordHidden;
+        } else {
+            passwordHidden = !passwordHidden;
+        }
+    }
+
+    spacing: 0
+    Rectangle {
+        id: inputLabelRect
+        color: "transparent"
+        Layout.fillWidth: true
+        height: (inputLabel.height + 10)
+        visible: showingHeader ? true : false
+
+        MoneroComponents.TextPlain {
+            id: inputLabel
+            anchors.top: parent.top
+            anchors.left: parent.left
+            font.family: MoneroComponents.Style.fontRegular.name
+            font.pixelSize: labelFontSize
+            font.bold: labelFontBold
+            textFormat: Text.RichText
+            color: MoneroComponents.Style.defaultFontColor
+            onLinkActivated: item.labelLinkActivated()
+
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.NoButton
+                cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.ArrowCursor
             }
         }
-        visible: copyButton && input.text !== ""
+
+        RowLayout {
+            anchors.right: parent.right
+            spacing: 16
+
+            MoneroComponents.LabelButton {
+                id: copyButtonId
+                text: qsTr("Copy") + translationManager.emptyString
+                onClicked: {
+                    if (input.text.length > 0) {
+                        console.log("Copied to clipboard");
+                        clipboard.setText(input.text);
+                        appWindow.showStatusMessage(qsTr("Copied to clipboard"), 3);
+                    }
+                }
+                visible: copyButton && input.text !== ""
+            }
+
+            MoneroComponents.LabelButton {
+                id: pasteButtonId
+                onClicked: {
+                    input.clear();
+                    input.paste();
+                }
+                text: qsTr("Paste") + translationManager.emptyString
+                visible: pasteButton
+            }
+        }
     }
 
-    Item{
-        id: inputItem
-        height: inputHeight * scaleRatio
-        anchors.top: showingHeader ? inputLabel.bottom : parent.top
-        anchors.topMargin: showingHeader ? 12 * scaleRatio : 2 * scaleRatio
-        width: parent.width
-        clip: true
+    MoneroComponents.Input {
+        id: input
+        Keys.onBacktabPressed: {
+            item.backtabPressed();
+            if (item.KeyNavigation.backtab) {
+                item.KeyNavigation.backtab.forceActiveFocus()
+            }
+        }
+        Keys.onTabPressed: {
+            item.tabPressed();
+            if (item.KeyNavigation.tab) {
+                item.KeyNavigation.tab.forceActiveFocus()
+            }
+        }
+        Layout.fillWidth: true
+        Layout.preferredHeight: inputHeight
 
-        Text {
+        leftPadding: item.inputPaddingLeft
+        rightPadding: (inlineButtons.width > 0 ? inlineButtons.width + inlineButtons.spacing : 0) + inputPaddingRight + (password || passwordLinked ? 45 : 0)
+        topPadding: item.inputPaddingTop
+        bottomPadding: item.inputPaddingBottom
+
+        font.family: item.fontFamily
+        font.pixelSize: item.fontSize
+        font.bold: item.fontBold
+        onEditingFinished: item.editingFinished()
+        onAccepted: item.accepted();
+        onTextChanged: item.textUpdated()
+        echoMode: isPasswordHidden() ? TextInput.Password : TextInput.Normal
+
+        MoneroComponents.Label {
+            visible: password || passwordLinked
+            fontSize: 20
+            text: isPasswordHidden() ? FontAwesome.eye : FontAwesome.eyeSlash
+            opacity: eyeMouseArea.containsMouse ? 0.9 : 0.7
+            fontFamily: FontAwesome.fontFamily
+            anchors.right: parent.right
+            anchors.rightMargin: 15
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: 1
+
+            MouseArea {
+                id: eyeMouseArea
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                hoverEnabled: true
+                onClicked: passwordToggle()
+            }
+        }
+
+        MoneroComponents.TextPlain {
             id: placeholderLabel
             visible: input.text ? false : true
             anchors.verticalCenter: parent.verticalCenter
             anchors.horizontalCenter: placeholderCenter ? parent.horizontalCenter : undefined
             anchors.left: placeholderCenter ? undefined : parent.left
-            anchors.leftMargin: {
-                if(placeholderCenter){
-                    return undefined;
-                }
-                else if(inlineIcon.visible){ return 50 * scaleRatio; }
-                else { return 10 * scaleRatio; }
-            }
+            anchors.leftMargin: placeholderLeftMargin
 
             opacity: item.placeholderOpacity
             color: item.placeholderColor
             font.family: item.placeholderFontFamily
-            font.pixelSize: placeholderFontSize * scaleRatio
+            font.pixelSize: placeholderFontSize
             font.bold: item.placeholderFontBold
             text: ""
             z: 3
@@ -169,8 +283,8 @@ Item {
 
         Rectangle {
             anchors.fill: parent
-            anchors.topMargin: 1 * scaleRatio
-            color: "transparent"
+            anchors.topMargin: 1
+            color: item.enabled ? "transparent" : MoneroComponents.Style.inputBoxBackgroundDisabled
         }
 
         Rectangle {
@@ -179,41 +293,15 @@ Item {
             anchors.fill: parent
             border.width: borderDisabled ? 0 : 1
             border.color: borderColor
-            radius: 4
+            radius: item.inputRadius
         }
 
-        Image {
-            id: inlineIcon
-            width: 26 * scaleRatio
-            height: 26 * scaleRatio
-            anchors.top: parent.top
-            anchors.topMargin: 8 * scaleRatio
-            anchors.left: parent.left
-            anchors.leftMargin: 12 * scaleRatio
-            source: "../images/moneroIcon-28x28.png"
-            visible: false
-        }
-
-        MoneroComponents.Input {
-            id: input
-            anchors.fill: parent
-            anchors.leftMargin: inlineIcon.visible ? 44 * scaleRatio : 0
-            font.pixelSize: item.fontSize
-            font.bold: item.fontBold
-            onEditingFinished: item.editingFinished()
-            onAccepted: item.accepted();
-            onTextChanged: item.textUpdated()
-            topPadding: 10 * scaleRatio
-            bottomPadding: 10 * scaleRatio
-        }
-
-        MoneroComponents.InlineButton {
-            id: inlineButtonId
-            visible: item.inlineButtonText ? true : false
+        RowLayout {
+            id: inlineButtons
+            anchors.verticalCenter: parent.verticalCenter
             anchors.right: parent.right
-            anchors.rightMargin: 8 * scaleRatio
-            anchors.top: parent.top
-            anchors.topMargin: 6 * scaleRatio
+            anchors.rightMargin: inputPaddingRight
+            spacing: 4
         }
     }
 }

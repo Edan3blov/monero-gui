@@ -12,8 +12,16 @@ function destinationsToAddress(destinations){
 }
 
 function addressTruncate(address, range){
+    if(typeof(address) === "undefined") return "";
     if(typeof(range) === "undefined") range = 8;
     return address.substring(0, range) + "..." + address.substring(address.length-range);
+}
+
+function addressTruncatePretty(address, blocks){
+    if(typeof(address) === "undefined") return "";
+    if(typeof(blocks) === "undefined") blocks = 2;
+    blocks = blocks <= 1 ? 1 : blocks >= 23 ? 23 : blocks;
+    return address.substring(0, 4 * blocks).match(/.{1,4}/g).join(' ') + " .. " + address.substring(address.length - 4 * blocks).match(/.{1,4}/g).join(' ');
 }
 
 function check256(str, length) {
@@ -52,7 +60,53 @@ function checkSignature(signature) {
         if ((signature.length - 12) % 88 != 0)
             return false;
         return check256(signature, signature.length);
+    } else if (signature.indexOf("ReserveProofV") === 0) {
+        if ((signature.length - 14) % 447 != 0)
+            return false;
+        return check256(signature, signature.length);
     }
     return false;
 }
 
+function isValidOpenAliasAddress(address) {
+    var regex = /^[A-Za-z0-9-@]+(\.[A-Za-z0-9-]+)+$/; // Basic domain structure, allow email-like address
+
+    if (!regex.test(address)) {
+        return false;
+    }
+
+    const lastPart = address.substring(address.lastIndexOf('.') + 1);
+    return isNaN(parseInt(lastPart)) || lastPart !== parseInt(lastPart).toString();
+}
+
+function handleOpenAliasResolution(address, descriptionText) {
+    const result = walletManager.resolveOpenAlias(address);
+    if (!result) {
+        return { message: qsTr("No address found") };
+    }
+
+    const [isDnssecValid, resolvedAddress] = result.split("|");
+    const isAddressValid = walletManager.addressValid(resolvedAddress, appWindow.persistentSettings.nettype);
+    let updatedDescriptionText = descriptionText;
+
+    if (isDnssecValid === "true") {
+        if (isAddressValid) {
+            updatedDescriptionText = descriptionText ? `${address} ${descriptionText}` : address;
+            return { address: resolvedAddress, description: updatedDescriptionText };
+        } else {
+            return { message: qsTr("No valid address found at this OpenAlias address") };
+        }
+    } else if (isDnssecValid === "false") {
+        if (isAddressValid) {
+            return {
+                address: resolvedAddress,
+                confirm: true,
+                message: qsTr("Address found, but the DNSSEC signatures could not be verified, so this address may be spoofed"),
+            };
+        } else {
+            return { message: qsTr("No valid address found at this OpenAlias address, but the DNSSEC signatures could not be verified, so this may be spoofed") };
+        }
+    } else {
+        return { message: qsTr("Internal error") };
+    }
+}

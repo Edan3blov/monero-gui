@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2018, The Monero Project
+// Copyright (c) 2014-2024, The Monero Project
 // 
 // All rights reserved.
 // 
@@ -26,11 +26,10 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import QtQuick 2.0
-import QtQuick.Controls 1.4
-import QtQuick.Controls.Styles 1.4
-import QtQuick.Layouts 1.1
-import QtQuick.Dialogs 1.2
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import QtQuick.Dialogs
 import "../../js/Windows.js" as Windows
 import "../../js/Utils.js" as Utils
 import "../../components" as MoneroComponents
@@ -46,8 +45,42 @@ ColumnLayout {
     Clipboard { id: clipboard }
     property bool viewOnly: false
     property int settingsHeight: 900
+    property alias settingsStateViewState: settingsStateView.state
 
-    Navbar{}
+    MoneroComponents.Navbar {
+        id: navbarId
+        Layout.alignment: Qt.AlignHCenter
+        Layout.topMargin: height
+        Layout.bottomMargin: height
+
+        MoneroComponents.NavbarItem {
+            active: settingsStateView.state == "Wallet"
+            text: qsTr("Wallet") + translationManager.emptyString
+            onSelected: settingsStateView.state = "Wallet"
+        }
+        MoneroComponents.NavbarItem {
+            active: settingsStateView.state == "UI"
+            text: qsTr("Interface") + translationManager.emptyString
+            onSelected: settingsStateView.state = "UI"
+        }
+        MoneroComponents.NavbarItem {
+            active: settingsStateView.state == "Node"
+            text: qsTr("Node") + translationManager.emptyString
+            visible: appWindow.walletMode >= 2
+            onSelected: settingsStateView.state = "Node"
+        }
+        MoneroComponents.NavbarItem {
+            active: settingsStateView.state == "Log"
+            text: qsTr("Log") + translationManager.emptyString
+            onSelected: settingsStateView.state = "Log"
+            visible: !isAndroid
+        }
+        MoneroComponents.NavbarItem {
+            active: settingsStateView.state == "Info"
+            text: qsTr("Info") + translationManager.emptyString
+            onSelected: settingsStateView.state = "Info"
+        }
+    }
 
     Rectangle{
         id: settingsStateView
@@ -59,23 +92,28 @@ ColumnLayout {
         property SettingsLog settingsLogView: SettingsLog { }
         property SettingsInfo settingsInfoView: SettingsInfo { }
         Layout.fillWidth: true
-        Layout.preferredHeight: parent.height
+        Layout.preferredHeight: settingsHeight
         color: "transparent"
         state: "Wallet"
 
         onCurrentViewChanged: {
             if (previousView) {
-//                if (typeof previousView.onPageClosed === "function") {
-//                    previousView.onPageClosed();
-//                }
+                if (typeof previousView.onPageClosed === "function") {
+                    previousView.onPageClosed();
+                }
             }
             previousView = currentView
             if (currentView) {
-                stackView.replace(currentView)
-                // Component.onCompleted is called before wallet is initilized
-//                if (typeof currentView.onPageCompleted === "function") {
-//                    currentView.onPageCompleted();
-//                }
+                if (stackView.currentItem !== currentView) {
+                    if (stackView.depth > 0) {
+                        stackView.replace(currentView)
+                    } else {
+                        stackView.push(currentView)
+                    }
+                }
+                if (typeof currentView.onPageCompleted === "function") {
+                    currentView.onPageCompleted();
+                }
             }
         }
 
@@ -83,18 +121,23 @@ ColumnLayout {
             State {
                 name: "Wallet"
                 PropertyChanges { target: settingsStateView; currentView: settingsStateView.settingsWalletView }
+                PropertyChanges { target: settingsPage; settingsHeight: settingsStateView.settingsWalletView.settingsHeight + 140 }
             }, State {
                 name: "UI"
                 PropertyChanges { target: settingsStateView; currentView: settingsStateView.settingsLayoutView }
+                PropertyChanges { target: settingsPage; settingsHeight: settingsStateView.settingsLayoutView.layoutHeight + 140 }
             }, State {
                 name: "Node"
                 PropertyChanges { target: settingsStateView; currentView: settingsStateView.settingsNodeView }
+                PropertyChanges { target: settingsPage; settingsHeight: settingsStateView.settingsNodeView.nodeHeight + 140 }
             }, State {
                 name: "Log"
                 PropertyChanges { target: settingsStateView; currentView: settingsStateView.settingsLogView }
+                PropertyChanges { target: settingsPage; settingsHeight: settingsStateView.settingsLogView.logHeight + 140 }
             }, State {
                 name: "Info"
                 PropertyChanges { target: settingsStateView; currentView: settingsStateView.settingsInfoView }
+                PropertyChanges { target: settingsPage; settingsHeight: settingsStateView.settingsInfoView.infoHeight + 140 }
             }
         ]
 
@@ -104,26 +147,6 @@ ColumnLayout {
             anchors.fill: parent
             clip: false // otherwise animation will affect left panel
 
-            delegate: StackViewDelegate {
-                pushTransition: StackViewTransition {
-                    PropertyAnimation {
-                        target: enterItem
-                        property: "x"
-                        from: 0 - target.width
-                        to: 0
-                        duration: 300
-                        easing.type: Easing.OutCubic
-                    }
-                    PropertyAnimation {
-                        target: exitItem
-                        property: "x"
-                        from: 0
-                        to: target.width
-                        duration: 300
-                        easing.type: Easing.OutCubic
-                    }
-                }
-            }
         }
     }
 

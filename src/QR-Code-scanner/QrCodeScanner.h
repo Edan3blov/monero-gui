@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2018, The Monero Project
+// Copyright (c) 2014-2024, The Monero Project
 //
 // All rights reserved.
 //
@@ -30,11 +30,12 @@
 #define QRCODESCANNER_H_
 
 #include <QImage>
+#include <QPointer>
 #include <QVideoFrame>
 #include "QrScanThread.h"
 
-class QVideoProbe;
-class QCamera;
+class QMediaCaptureSession;
+class QVideoSink;
 
 class QrCodeScanner : public QObject
 {
@@ -45,20 +46,19 @@ class QrCodeScanner : public QObject
 public:
     QrCodeScanner(QObject *parent = Q_NULLPTR);
     ~QrCodeScanner();
-    void setSource(QCamera*);
+    Q_INVOKABLE bool setSource(QObject *camera);
+    Q_INVOKABLE bool setVideoOutput(QObject *videoOutput);
 
     bool enabled() const;
     void setEnabled(bool enabled);
 
 public Q_SLOTS:
-    void processCode(int type, const QString &data);
     void processFrame(QVideoFrame);
 
 Q_SIGNALS:
     void enabledChanged();
 
-    void decoded(const QString &address, const QString &payment_id, const QString &amount, const QString &tx_description, const QString &recipient_name, const QVariantMap &extra_parameters);
-    void decode(int type, const QString &data);
+    void decoded(const QString &data);
     void notifyError(const QString &error, bool warning = false);
 
 protected:
@@ -68,7 +68,8 @@ protected:
     int m_processInterval;
     int m_enabled;
     QVideoFrame m_curFrame;
-    QVideoProbe *m_probe;
+    QMediaCaptureSession *m_captureSession;
+    QPointer<QVideoSink> m_sink;
 };
 
 #endif

@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2018, The Monero Project
+// Copyright (c) 2014-2024, The Monero Project
 // 
 // All rights reserved.
 // 
@@ -26,402 +26,169 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import QtQuick 2.7
-import QtQuick.Layouts 1.1
-import QtQuick.Controls 2.0
-import QtQuick.Dialogs 1.2
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
+import QtQuick.Dialogs
+
+import FontAwesome
 
 import "../../js/Utils.js" as Utils
 import "../../components" as MoneroComponents
 
 Rectangle {
     color: "transparent"
-    height: 1400
     Layout.fillWidth: true
+    property alias settingsHeight: settingsWallet.height
 
     ColumnLayout {
         id: settingsWallet
-        property int itemHeight: 60 * scaleRatio
         Layout.fillWidth: true
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.right: parent.right
-        anchors.margins: (isMobile)? 17 : 20
+        anchors.margins: 20
         anchors.topMargin: 0
         spacing: 0
 
-        Rectangle {
-            // divider
-            Layout.preferredHeight: 1 * scaleRatio
-            Layout.fillWidth: true
-            Layout.bottomMargin: 8 * scaleRatio
-            color: MoneroComponents.Style.dividerColor
-            opacity: MoneroComponents.Style.dividerOpacity
+        MoneroComponents.SettingsListItem {
+            iconText: FontAwesome.lock
+            description: qsTr("Locks the wallet on demand.") + translationManager.emptyString
+            title: qsTr("Lock this wallet") + translationManager.emptyString
+            symbol: (isMac ? "⌃" : qsTr("Ctrl+")) + "L" + translationManager.emptyString
+            onClicked: appWindow.lock();
         }
 
-        GridLayout {
-            Layout.fillWidth: true
-            Layout.preferredHeight: settingsWallet.itemHeight
-            columnSpacing: 0
+        MoneroComponents.SettingsListItem {
+            iconText: FontAwesome.signOutAlt
+            description: qsTr("Logs out of this wallet.") + translationManager.emptyString
+            title: qsTr("Close this wallet") + translationManager.emptyString
 
-            ColumnLayout {
-                Layout.fillWidth: true
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 0
+            onClicked: appWindow.showWizard()
+        }
 
-                Text {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 20 * scaleRatio
-                    Layout.topMargin: 8 * scaleRatio
-                    color: "white"
-                    font.bold: true
-                    font.family: MoneroComponents.Style.fontRegular.name
-                    font.pixelSize: 16 * scaleRatio
-                    text: qsTr("Close this wallet") + translationManager.emptyString
+        MoneroComponents.SettingsListItem {
+            iconText: FontAwesome.eye
+            description: qsTr("Creates a new wallet that can only view and initiate transactions, but requires a spendable wallet to sign transactions before sending.") + translationManager.emptyString
+            title: qsTr("Create a view-only wallet") + translationManager.emptyString
+            visible: !appWindow.viewOnly && (currentWallet ? !currentWallet.isLedger() : true)
+
+            onClicked: {
+                var newPath = currentWallet.path + "_viewonly";
+                if (currentWallet.createViewOnly(newPath, appWindow.walletPassword)) {
+                    console.log("view only wallet created in " + newPath);
+                    informationPopup.title  = qsTr("Success") + translationManager.emptyString;
+                    informationPopup.text = qsTr('The view only wallet has been created with the same password as the current wallet. You can open it by closing this current wallet, clicking the "Open wallet from file" option, and selecting the view wallet in: \n%1\nYou can change the password in the wallet settings.').arg(newPath);
+                    informationPopup.open()
+                    informationPopup.onCloseCallback = null
+                } else {
+                    informationPopup.title  = qsTr("Error") + translationManager.emptyString;
+                    informationPopup.text = currentWallet.errorString;
+                    informationPopup.open()
                 }
-
-                TextArea {
-                    Layout.fillWidth: true
-                    color: MoneroComponents.Style.dimmedFontColor
-                    font.family: MoneroComponents.Style.fontRegular.name
-                    font.pixelSize: 14 * scaleRatio
-                    horizontalAlignment: TextInput.AlignLeft
-                    selectByMouse: false
-                    wrapMode: Text.WordWrap;
-                    textMargin: 0
-                    leftPadding: 0
-                    topPadding: 0
-                    text: qsTr("Logs out of this wallet.") + translationManager.emptyString
-                    width: parent.width
-                    readOnly: true
-
-                    // @TODO: Legacy. Remove after Qt 5.8.
-                    // https://stackoverflow.com/questions/41990013
-                    MouseArea {
-                        anchors.fill: parent
-                        enabled: false
-                    }
-                } 
             }
+        }
 
-            Rectangle {
-                Layout.minimumWidth: 120 * scaleRatio
-                Layout.preferredWidth: closeWalletText.width + (20 * scaleRatio)
-                Layout.preferredHeight: parent.height
-                color: "transparent"
+        MoneroComponents.SettingsListItem {
+            iconText: FontAwesome.key
+            description: qsTr("Store this information safely to recover your wallet in the future.") + translationManager.emptyString
+            title: qsTr("Show seed & keys") + translationManager.emptyString
 
-                Rectangle{
-                    width: parent.width
-                    height: 24 * scaleRatio
-                    radius: 2 * scaleRatio
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    color: MoneroComponents.Style.buttonBackgroundColorDisabled
+            onClicked: {
+                Utils.showSeedPage();
+            }
+        }
 
-                    Text {
-                        id: closeWalletText
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        color: MoneroComponents.Style.defaultFontColor
-                        font.family: MoneroComponents.Style.fontRegular.name
-                        font.pixelSize: 14 * scaleRatio
-                        font.bold: true
-                        text: qsTr("Close wallet") + translationManager.emptyString
+        MoneroComponents.SettingsListItem {
+            enabled: leftPanel.progressBar.fillLevel == 100
+            iconText: FontAwesome.repeat
+            description: qsTr("Use this feature if you think the shown balance is not accurate.") + translationManager.emptyString
+            title: qsTr("Rescan wallet balance") + translationManager.emptyString
+            visible: appWindow.walletMode >= 2
+
+            onClicked: {
+                if (!currentWallet.rescanSpent()) {
+                    console.error("Error: ", currentWallet.errorString);
+                    informationPopup.title = qsTr("Error") + translationManager.emptyString;
+                    if (currentWallet.errorString == "Rescan spent can only be used with a trusted daemon") {
+                        informationPopup.text = qsTr("Error: ") + qsTr("Rescan spent can only be used with a trusted remote node. If you trust the current node you are connected to (%1), you can mark it as trusted in Settings > Node page.").arg(remoteNodesModel.currentRemoteNode().address) + translationManager.emptyString;
+                    } else {
+                        informationPopup.text = qsTr("Error: ") + currentWallet.errorString;
                     }
+                    informationPopup.onCloseCallback = null
+                    informationPopup.open();
+                } else {
+                    informationPopup.title = qsTr("Information") + translationManager.emptyString
+                    informationPopup.text  = qsTr("Successfully rescanned spent outputs.") + translationManager.emptyString
+                    informationPopup.onCloseCallback = null
+                    informationPopup.open();
+                }
+            }
+        }
 
-                    MouseArea {
-                        cursorShape: Qt.PointingHandCursor
-                        anchors.fill: parent
-                        onClicked: {
-                            appWindow.showWizard();
+        MoneroComponents.SettingsListItem {
+            enabled: leftPanel.progressBar.fillLevel == 100
+            iconText: FontAwesome.magnifyingGlass
+            description: qsTr("Use this feature if a transaction is missing in your wallet history. This will expose the transaction ID to the remote node, which can harm your privacy.") + translationManager.emptyString
+            title: qsTr("Scan transaction") + translationManager.emptyString
+
+            onClicked: {
+                inputDialog.labelText = qsTr("Enter a transaction ID:") + translationManager.emptyString;
+                inputDialog.onAcceptedCallback = function() {
+                    var txid = inputDialog.inputText.trim();
+                    if (currentWallet.scanTransactions([txid])) {
+                        updateBalance();
+                        appWindow.showStatusMessage(qsTr("Transaction successfully scanned"), 3);
+                    } else {
+                        console.error("Error: ", currentWallet.errorString);
+                        if (currentWallet.errorString == "The wallet has already seen 1 or more recent transactions than the scanned tx") {
+                            informationPopup.title = qsTr("Error") + translationManager.emptyString;
+                            informationPopup.text = qsTr("The wallet has already seen 1 or more recent transactions than the scanned transaction.\n\nIn order to rescan the transaction, you can re-sync your wallet by resetting the wallet restore height in the Settings > Info page. Make sure to use a restore height from before your wallet's earliest transaction.") + translationManager.emptyString;
+                            informationPopup.onCloseCallback = null
+                            informationPopup.open();
+                        } else {
+                            appWindow.showStatusMessage(qsTr("Failed to scan transaction") + ": " + currentWallet.errorString, 5);
                         }
                     }
                 }
+                inputDialog.onRejectedCallback = null;
+                inputDialog.open()
             }
         }
 
-        Rectangle {
-            // divider
-            Layout.preferredHeight: 1 * scaleRatio
-            Layout.fillWidth: true
-            Layout.topMargin: 8 * scaleRatio
-            Layout.bottomMargin: 8 * scaleRatio
-            color: MoneroComponents.Style.dividerColor
-            opacity: MoneroComponents.Style.dividerOpacity
-        }
+        MoneroComponents.SettingsListItem {
+            iconText: FontAwesome.ellipsisH
+            description: qsTr("Change the password of your wallet.") + translationManager.emptyString
+            title: qsTr("Change wallet password") + translationManager.emptyString
 
-        GridLayout {
-            Layout.fillWidth: true
-            Layout.preferredHeight: settingsWallet.itemHeight
-            columnSpacing: 0
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 0
-
-                Text {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 20 * scaleRatio
-                    Layout.topMargin: 8 * scaleRatio
-                    color: "white"
-                    font.bold: true
-                    font.family: MoneroComponents.Style.fontRegular.name
-                    font.pixelSize: 16 * scaleRatio
-                    text: qsTr("Create a view-only wallet") + translationManager.emptyString
-                }
-
-                TextArea {
-                    Layout.fillWidth: true
-                    color: MoneroComponents.Style.dimmedFontColor
-                    font.family: MoneroComponents.Style.fontRegular.name
-                    font.pixelSize: 14 * scaleRatio
-                    horizontalAlignment: TextInput.AlignLeft
-                    selectByMouse: false
-                    wrapMode: Text.WordWrap;
-                    textMargin: 0
-                    leftPadding: 0
-                    topPadding: 0
-                    text: qsTr("Creates a new wallet that can only view and initiate transactions, but requires a spendable wallet to sign transactions before sending.") + translationManager.emptyString
-                    width: parent.width
-                    readOnly: true
-
-                    // @TODO: Legacy. Remove after Qt 5.8.
-                    // https://stackoverflow.com/questions/41990013
-                    MouseArea {
-                        anchors.fill: parent
-                        enabled: false
-                    }
-                } 
-            }
-
-            Rectangle {
-                Layout.minimumWidth: 120 * scaleRatio
-                Layout.preferredWidth: createViewOnlyText.width + (20 * scaleRatio)
-                Layout.preferredHeight: parent.height
-                color: "transparent"
-
-                Rectangle{
-                    width: parent.width
-                    height: 24 * scaleRatio
-                    radius: 2 * scaleRatio
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    color: MoneroComponents.Style.buttonBackgroundColorDisabled
-
-                    Text {
-                        id: createViewOnlyText
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        color: MoneroComponents.Style.defaultFontColor
-                        font.family: MoneroComponents.Style.fontRegular.name
-                        font.pixelSize: 14 * scaleRatio
-                        font.bold: true
-                        text: qsTr("Create wallet") + translationManager.emptyString
-                    }
-
-                    MouseArea {
-                        cursorShape: Qt.PointingHandCursor
-                        anchors.fill: parent
-                        onClicked: {
-                            wizard.openCreateViewOnlyWalletPage();
+            onClicked: {
+                passwordDialog.onAcceptedCallback = function() {
+                    if(appWindow.walletPassword === passwordDialog.password){
+                        passwordDialog.openNewPasswordDialog()
+                    } else {
+                        informationPopup.title  = qsTr("Error") + translationManager.emptyString;
+                        informationPopup.text = qsTr("Wrong password") + translationManager.emptyString;
+                        informationPopup.open()
+                        informationPopup.onCloseCallback = function() {
+                            passwordDialog.open()
                         }
                     }
                 }
+                passwordDialog.onRejectedCallback = null;
+                passwordDialog.open()
             }
         }
 
-        Rectangle {
-            // divider
-            Layout.preferredHeight: 1 * scaleRatio
-            Layout.fillWidth: true
-            Layout.topMargin: 8 * scaleRatio
-            Layout.bottomMargin: 8 * scaleRatio
-            color: MoneroComponents.Style.dividerColor
-            opacity: MoneroComponents.Style.dividerOpacity
-        }
+        MoneroComponents.SettingsListItem {
+            iconText: FontAwesome.cashRegister
+            isLast: true
+            description: qsTr("Receive Monero for your business, easily.") + translationManager.emptyString
+            title: qsTr("Enter merchant mode") + translationManager.emptyString
 
-        GridLayout {
-            Layout.fillWidth: true
-            Layout.preferredHeight: settingsWallet.itemHeight
-            columnSpacing: 0
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 0
-
-                Text {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 20 * scaleRatio
-                    Layout.topMargin: 8 * scaleRatio
-                    color: "white"
-                    font.bold: true
-                    font.family: MoneroComponents.Style.fontRegular.name
-                    font.pixelSize: 16 * scaleRatio
-                    text: qsTr("Show seed & keys") + translationManager.emptyString
-                }
-
-                TextArea {
-                    Layout.fillWidth: true
-                    color: MoneroComponents.Style.dimmedFontColor
-                    font.family: MoneroComponents.Style.fontRegular.name
-                    font.pixelSize: 14 * scaleRatio
-                    horizontalAlignment: TextInput.AlignLeft
-                    selectByMouse: false
-                    wrapMode: Text.WordWrap;
-                    textMargin: 0 * scaleRatio
-                    leftPadding: 0
-                    topPadding: 0
-                    text: qsTr("Store this information safely to recover your wallet in the future.") + translationManager.emptyString
-                    width: parent.width
-                    readOnly: true
-
-                    // @TODO: Legacy. Remove after Qt 5.8.
-                    // https://stackoverflow.com/questions/41990013
-                    MouseArea {
-                        anchors.fill: parent
-                        enabled: false
-                    }
-                } 
-            }
-
-            Rectangle {
-                Layout.minimumWidth: 120 * scaleRatio
-                Layout.preferredWidth: showSeedText.width + (20 * scaleRatio)
-                Layout.preferredHeight: parent.height
-                color: "transparent"
-
-                Rectangle{
-                    width: parent.width
-                    height: 24 * scaleRatio
-                    radius: 2 * scaleRatio
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    color: MoneroComponents.Style.buttonBackgroundColorDisabled
-
-                    Text {
-                        id: showSeedText
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        color: MoneroComponents.Style.defaultFontColor
-                        font.family: MoneroComponents.Style.fontRegular.name
-                        font.pixelSize: 14 * scaleRatio
-                        font.bold: true
-                        text: qsTr("Show seed") + translationManager.emptyString
-                    }
-
-                    MouseArea {
-                        cursorShape: Qt.PointingHandCursor
-                        anchors.fill: parent
-                        onClicked: Utils.showSeedPage();
-                    }
-                }
-            }
-        }
-
-        Rectangle {
-            // divider
-            Layout.preferredHeight: 1 * scaleRatio
-            Layout.fillWidth: true
-            Layout.topMargin: 8 * scaleRatio
-            Layout.bottomMargin: 8 * scaleRatio
-            color: MoneroComponents.Style.dividerColor
-            opacity: MoneroComponents.Style.dividerOpacity
-        }
-
-        GridLayout {
-            Layout.fillWidth: true
-            Layout.preferredHeight: settingsWallet.itemHeight
-            columnSpacing: 0
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 0
-
-                Text {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 20 * scaleRatio
-                    Layout.topMargin: 8 * scaleRatio
-                    color: "white"
-                    font.bold: true
-                    font.family: MoneroComponents.Style.fontRegular.name
-                    font.pixelSize: 16 * scaleRatio
-                    text: qsTr("Rescan wallet balance") + translationManager.emptyString
-                }
-
-                TextArea {
-                    Layout.fillWidth: true
-                    color: MoneroComponents.Style.dimmedFontColor
-                    font.family: MoneroComponents.Style.fontRegular.name
-                    font.pixelSize: 14 * scaleRatio
-                    horizontalAlignment: TextInput.AlignLeft
-                    selectByMouse: false
-                    wrapMode: Text.WordWrap;
-                    textMargin: 0
-                    leftPadding: 0
-                    topPadding: 0
-                    text: qsTr("Use this feature if you think the shown balance is not accurate.") + translationManager.emptyString
-                    width: parent.width
-                    readOnly: true
-
-                    // @TODO: Legacy. Remove after Qt 5.8.
-                    // https://stackoverflow.com/questions/41990013
-                    MouseArea {
-                        anchors.fill: parent
-                        enabled: false
-                    }
-                } 
-            }
-
-            Rectangle {
-                Layout.minimumWidth: 120 * scaleRatio
-                Layout.preferredWidth: rescanButtonText.width + (20 * scaleRatio)
-                Layout.preferredHeight: parent.height
-                color: "transparent"
-
-                Rectangle{
-                    width: parent.width
-
-                    height: 24 * scaleRatio
-                    radius: 2 * scaleRatio
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    color: MoneroComponents.Style.buttonBackgroundColorDisabled
-
-                    Text {
-                        id: rescanButtonText
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        color: MoneroComponents.Style.defaultFontColor
-                        font.family: MoneroComponents.Style.fontRegular.name
-                        font.pixelSize: 14 * scaleRatio
-                        font.bold: true
-                        text: qsTr("Rescan") + translationManager.emptyString
-                    }
-
-                    MouseArea {
-                        cursorShape: Qt.PointingHandCursor
-                        anchors.fill: parent
-                        onClicked: {
-                            if (!currentWallet.rescanSpent()) {
-                                console.error("Error: ", currentWallet.errorString);
-                                informationPopup.title = qsTr("Error") + translationManager.emptyString;
-                                informationPopup.text  = qsTr("Error: ") + currentWallet.errorString
-                                informationPopup.icon  = StandardIcon.Critical
-                                informationPopup.onCloseCallback = null
-                                informationPopup.open();
-                            } else {
-                                informationPopup.title = qsTr("Information") + translationManager.emptyString
-                                informationPopup.text  = qsTr("Successfully rescanned spent outputs.") + translationManager.emptyString
-                                informationPopup.icon  = StandardIcon.Information
-                                informationPopup.onCloseCallback = null
-                                informationPopup.open();
-                            }
-                        }
-                    }
-                }
+            onClicked: {
+                middlePanel.state = "Merchant";
+                middlePanel.flickable.contentY = 0;
+                updateBalance();
             }
         }
     }

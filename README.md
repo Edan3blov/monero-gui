@@ -1,14 +1,32 @@
 # Monero GUI
 
-Copyright (c) 2014-2018, The Monero Project
+Copyright (c) 2014-2024, The Monero Project
+
+## Table of Contents
+  * [Development resources](#development-resources)
+  * [Vulnerability response](#vulnerability-response)
+  * [Introduction](#introduction)
+  * [About this project](#about-this-project)
+  * [Supporting the project](#supporting-the-project)
+  * [License](#license)
+  * [Translations](#translations)
+  * [Installing the Monero GUI from a package](#installing-the-monero-gui-from-a-package)
+  * [Compiling the Monero GUI from source](#compiling-the-monero-gui-from-source)
+    + [Building Reproducible Windows static binaries with Docker (any OS)](#building-reproducible-windows-static-binaries-with-docker-any-os)
+    + [Building Reproducible Linux static binaries with Docker (any OS)](#building-reproducible-linux-static-binaries-with-docker-any-os)
+    + [Building Android APK with Docker (any OS) *Experimental*](#building-android-apk-with-docker-any-os-experimental)
+    + [Building on Linux](#building-on-linux)
+    + [Building on OS X](#building-on-os-x)
+    + [Building on Windows](#building-on-windows)
 
 ## Development resources
 
 - Web: [getmonero.org](https://getmonero.org)
-- Forum: [forum.getmonero.org](https://forum.getmonero.org)
 - Mail: [dev@getmonero.org](mailto:dev@getmonero.org)
 - Github: [https://github.com/monero-project/monero-gui](https://github.com/monero-project/monero-gui)
-- IRC: [#monero-dev on Freenode](irc://chat.freenode.net/#monero-dev)
+- IRC: [#monero-gui on Libera](irc://irc.libera.chat/#monero-gui)
+- Translation platform (Weblate): [translate.getmonero.org](https://translate.getmonero.org)
+- UI Design: [Monero-GUI on Figma](https://www.figma.com/file/DplJ2DDQfIKiuRvolHX2hN/Monero-GUI)
 
 ## Vulnerability response
 
@@ -35,19 +53,15 @@ As with many development projects, the repository on Github is considered to be 
 
 Monero is a 100% community-sponsored endeavor. If you want to join our efforts, the easiest thing you can do is support the project financially. Both Monero and Bitcoin donations can be made to **donate.getmonero.org** if using a client that supports the [OpenAlias](https://openalias.org) standard.
 
-The Monero donation address is: `44AFFq5kSiGBoZ4NMDwYtN18obc8AemS33DBLWs3H7otXft3XjrpDtQGv7SqSsaBYBb98uNbr2VBBEt7f2wfn3RVGQBEP3A` (viewkey: `f359631075708155cc3d92a32b75a7d02a5dcf27756707b47a2b31b21c389501`)
+The Monero donation address is: `888tNkZrPN6JsEgekjMnABU4TBzc2Dt29EPAvkRxbANsAnjyPbb3iQ1YBRk1UXcdRsiKc9dhwMVgN5S9cQUiyoogDavup3H` (viewkey: `f359631075708155cc3d92a32b75a7d02a5dcf27756707b47a2b31b21c389501`)
 
 The Bitcoin donation address is: `1KTexdemPdxSBcG55heUuTjDRYqbC5ZL8H`
 
-GUI development funding and/or some supporting services are also graciously provided by sponsors:
+GUI development funding and/or some supporting services are also graciously provided by [sponsors](https://www.getmonero.org/community/sponsorships/):
 
-[<img width="80" src="https://static.getmonero.org/images/sponsors/mymonero.png"/>](https://mymonero.com)
-[<img width="150" src="https://static.getmonero.org/images/sponsors/kitware.png?1"/>](http://kitware.com)
-[<img width="100" src="https://static.getmonero.org/images/sponsors/dome9.png"/>](http://dome9.com)
-[<img width="150" src="https://static.getmonero.org/images/sponsors/araxis.png"/>](http://araxis.com)
-[<img width="150" src="https://static.getmonero.org/images/sponsors/jetbrains.png"/>](http://www.jetbrains.com/)
-[<img width="150" src="https://static.getmonero.org/images/sponsors/navicat.png"/>](http://www.navicat.com/)
-[<img width="150" src="https://static.getmonero.org/images/sponsors/symas.png"/>](http://www.symas.com/)
+[<img width="150" src="https://www.getmonero.org/img/sponsors/tarilabs.png"/>](https://tarilabs.com/)
+[<img width="150" src="https://www.getmonero.org/img/sponsors/symas.png"/>](https://symas.com/)
+[<img width="150" src="https://www.getmonero.org/img/sponsors/macstadium.png"/>](https://www.macstadium.com/)
 
 There are also several mining pools that kindly donate a portion of their fees, [a list of them can be found on our Bitcointalk post](https://bitcointalk.org/index.php?topic=583449.0).
 
@@ -55,71 +69,235 @@ There are also several mining pools that kindly donate a portion of their fees, 
 
 See [LICENSE](LICENSE).
 
+## Translations
+
+Do you speak a second language and would like to help translate the Monero GUI? Check out Weblate, our localization platform, at [translate.getmonero.org](https://translate.getmonero.org/). Choose the language and suggest a translation for a string or review an existing one. The Localization Workgroup made [a guide with step-by-step instructions](https://github.com/monero-ecosystem/monero-translations/blob/master/weblate.md) for Weblate.
+
+If you need help/support or any info you can contact the localization workgroup on the IRC channel #monero-translations (relayed on [Matrix](https://matrix.to/#/!BKMbQLMDzHKzmtrBfg:matrix.org?via=monero.social&via=matrix.org&via=libera.chat)) or by email at translate[at]getmonero[dot]org. For more info about the Localization workgroup: [github.com/monero-ecosystem/monero-translations](https://github.com/monero-ecosystem/monero-translations)
+
+Status of the translations:  
+
+<a href="https://translate.getmonero.org/engage/monero/?utm_source=widget">
+<img src="https://translate.getmonero.org/widgets/monero/-/gui-wallet/horizontal-auto.svg" alt="Translation status" />
+</a>
+
 ## Installing the Monero GUI from a package
 
 Packages are available for
-
-* Arch Linux via AUR: [monero-wallet-qt](https://aur.archlinux.org/packages/monero-wallet-qt/)
-* Void Linux: xbps-install -S monero-core
-* GuixSD: guix package -i monero-core
+* Arch Linux: [monero-gui](https://archlinux.org/packages/extra/x86_64/monero-gui/)
+* NixOS: `nix-shell -p monero-gui`
+* Flatpak: [Monero GUI](https://flathub.org/apps/details/org.getmonero.Monero)
+* GuixSD: `guix package -i monero-gui`
+* macOS (homebrew): `brew install --cask monero-wallet`
 
 Packaging for your favorite distribution would be a welcome contribution!
 
 ## Compiling the Monero GUI from source
 
-### On Linux:
+*Note*: Qt 6.8 is the minimum version required to build the GUI.
 
-(Tested on Ubuntu 17.10 x64, Ubuntu 18.04 x64 and Gentoo x64)
+*Note*: Official GUI releases use monero-wallet-gui from this process alongside the supporting binaries (monerod, etc) from the [CLI deterministic builds](https://github.com/monero-project/monero/blob/release-v0.18/contrib/gitian/README.md).
+
+*Note*: The convenience targets in the project Makefile require the Ninja build system. Other CMake generators can still be used by invoking CMake directly. Ninja builds in parallel by default. To limit or set the number of parallel build jobs, set `CMAKE_BUILD_PARALLEL_LEVEL`, for example `CMAKE_BUILD_PARALLEL_LEVEL=4 make release`.
+
+### Building Reproducible Windows static binaries with Docker (any OS)
+
+1. Install Docker [https://docs.docker.com/engine/install/](https://docs.docker.com/engine/install/)
+2. Clone the repository
+   ```
+   git clone --branch master --recursive https://github.com/monero-project/monero-gui.git
+   ```
+   \* `master` - replace with the desired version tag (e.g. `v0.18.5.4`) to build the release binaries.
+3. Prepare build environment
+   ```
+   cd monero-gui
+   docker build --tag monero:build-env-windows --build-arg THREADS=4 --file Dockerfile.windows .
+   ```
+   \* `4` - number of CPU threads to use
+
+4. Build
+   ```
+   docker run --rm -it -v <MONERO_GUI_DIR_FULL_PATH>:/monero-gui -w /monero-gui monero:build-env-windows sh -c 'make depends root=/depends target=x86_64-w64-mingw32 tag=win-x64'
+   ```
+   \* `<MONERO_GUI_DIR_FULL_PATH>` - absolute path to `monero-gui` directory  
+   \* Set `CMAKE_BUILD_PARALLEL_LEVEL` to control the number of parallel build jobs, e.g. add `-e CMAKE_BUILD_PARALLEL_LEVEL=4` to the `docker run` command
+5. Monero GUI Windows static binaries will be placed in  `monero-gui/build/x86_64-w64-mingw32/release/bin` directory
+
+### Building Reproducible Linux static binaries with Docker (any OS)
+
+1. Install Docker [https://docs.docker.com/engine/install/](https://docs.docker.com/engine/install/)
+2. Clone the repository
+   ```
+   git clone --branch master --recursive https://github.com/monero-project/monero-gui.git
+   ```
+   \* `master` - replace with the desired version tag (e.g. `v0.18.5.4`) to build the release binaries.
+3. Prepare build environment
+   ```
+   cd monero-gui
+   docker build --tag monero:build-env-linux --build-arg THREADS=4 --file Dockerfile.linux .
+   ```
+   \* `4` - number of CPU threads to use
+
+   The image builds the non-Qt dependencies with Monero's `contrib/depends`
+   system and installs Qt into the resulting `/depends/x86_64-linux-gnu`
+   prefix.
+
+4. Build
+   ```
+   docker run --rm -it -v <MONERO_GUI_DIR_FULL_PATH>:/monero-gui -w /monero-gui monero:build-env-linux sh -c 'make depends root=/depends target=x86_64-linux-gnu tag=linux-x64'
+   ```
+   \* `<MONERO_GUI_DIR_FULL_PATH>` - absolute path to `monero-gui` directory  
+   \* Set `CMAKE_BUILD_PARALLEL_LEVEL` to control the number of parallel build jobs, e.g. add `-e CMAKE_BUILD_PARALLEL_LEVEL=4` to the `docker run` command
+
+5. Monero GUI Linux static binary will be placed in `monero-gui/build/x86_64-linux-gnu/release/bin` directory
+6. (*Note*) This process is only for building `monero-wallet-gui`, `monerod` has to be built separately according to the instructions in the `monero` repository.
+7. (*Optional*) Compare `monero-wallet-gui` SHA-256 hash to the one obtained from a trusted source
+   ```
+   docker run --rm -it -v <MONERO_GUI_DIR_FULL_PATH>:/monero-gui -w /monero-gui monero:build-env-linux sh -c 'shasum -a 256 /monero-gui/build/x86_64-linux-gnu/release/bin/monero-wallet-gui'
+   ```
+   \* `<MONERO_GUI_DIR_FULL_PATH>` - absolute path to `monero-gui` directory  
+
+### Building Android APK with Docker (any OS) *Experimental*
+ - Minimum Android 9 Pie (API 28)
+ - ARMv8-A 64-bit CPU
+1. Install Docker [https://docs.docker.com/engine/install/](https://docs.docker.com/engine/install/)
+2. Clone the repository
+   ```
+   git clone --recursive https://github.com/monero-project/monero-gui.git
+   ```
+3. Prepare build environment
+   ```
+   cd monero-gui
+   docker build --tag monero:build-env-android --build-arg THREADS=4 --file Dockerfile.android .
+   ```
+   \* `4` - number of CPU threads to use
+
+4. Build
+   ```
+   docker run --rm -it -v <MONERO_GUI_DIR_FULL_PATH>:/monero-gui monero:build-env-android
+   ```
+   \* `<MONERO_GUI_DIR_FULL_PATH>` - absolute path to `monero-gui` directory  
+   \* Set `CMAKE_BUILD_PARALLEL_LEVEL` to control the number of parallel build jobs, e.g. add `-e CMAKE_BUILD_PARALLEL_LEVEL=4` to the `docker run` command
+5. Monero GUI APK will be placed in  `monero-gui/build/Android/release/android-build` directory
+6. Deploy
+   * Using ADB (Android debugger bridge)
+     - [Enable adb debugging on your device](https://developer.android.com/studio/command-line/adb.html#Enabling)
+      * Connect your device with USB and install Monero GUI APK with adb:
+      ```
+      adb install build/Android/release/android-build/monero-gui.apk
+      ```
+      * Troubleshooting:
+      ```
+      adb devices -l
+      adb logcat
+      ```
+      * If using adb inside docker, make sure you did
+      ```
+      docker run -v /dev/bus/usb:/dev/bus/usb --privileged
+      ```
+   * Using a web server
+      ```
+      mkdir /usr/tmp
+      cp build/Android/release/android-build/monero-gui.apk /usr/tmp
+      docker run -d -v /usr/tmp:/usr/share/nginx/html:ro -p 8080:80 nginx
+      ```
+      Now it should be accessible through a web browser at
+      ```
+      http://<your.local.ip>:8080/QtApp-debug.apk
+      ```
+
+### Comparing Docker Qt build times
+
+`Dockerfile.linux`, `Dockerfile.windows`, and `Dockerfile.android` enable Qt unity
+builds by default. Add `--build-arg QT_UNITY_BUILD=OFF` to disable them, or
+`--build-arg QT_UNITY_BUILD=ON` to enable them explicitly. Use the same setting
+when comparing reproducible binary hashes.
+
+To compare fresh Qt builds, run both variants sequentially on the same builder
+with the same CPU and memory allocation, thread count, and platform. For example,
+from the repository root on an amd64 builder:
+
+```sh
+docker build --no-cache --progress=plain --platform linux/amd64 \
+  --build-arg THREADS=4 --build-arg QT_UNITY_BUILD=OFF \
+  --tag monero:build-env-linux-unity-off --file Dockerfile.linux . \
+  > qt-unity-off.log 2>&1
+docker build --no-cache --progress=plain --platform linux/amd64 \
+  --build-arg THREADS=4 --build-arg QT_UNITY_BUILD=ON \
+  --tag monero:build-env-linux-unity-on --file Dockerfile.linux . \
+  > qt-unity-on.log 2>&1
+```
+
+Compare the Qt build step durations in the two logs as well as total image build
+time; downloads and other dependencies can affect the total. For Windows or
+Android, substitute the corresponding Dockerfile and image tags, and include
+both the host-tools and target Qt build steps in the comparison.
+
+### Building on Linux
 
 1. Install Monero dependencies
 
   - For Debian distributions (Debian, Ubuntu, Mint, Tails...)
 
-	`sudo apt install build-essential cmake libboost-all-dev miniupnpc libunbound-dev graphviz doxygen libunwind8-dev pkg-config libssl-dev libzmq3-dev libsodium-dev libhidapi-dev`
+	`sudo apt install build-essential cmake ninja-build libunbound-dev graphviz doxygen pkg-config libssl-dev libzmq3-dev libsodium-dev libhidapi-dev libnorm-dev libusb-1.0-0-dev libpgm-dev libprotobuf-dev protobuf-compiler libgcrypt20-dev libboost-chrono-dev libboost-date-time-dev libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev libboost-regex-dev libboost-serialization-dev libboost-system-dev libboost-thread-dev`
 
   - For Gentoo
 
-	`sudo emerge app-arch/xz-utils app-doc/doxygen dev-cpp/gtest dev-libs/boost dev-libs/expat dev-libs/openssl dev-util/cmake media-gfx/graphviz net-dns/unbound net-libs/ldns net-libs/miniupnpc net-libs/zeromq sys-libs/libunwind dev-libs/libsodium dev-libs/hidapi`
+	`sudo emerge app-arch/xz-utils app-doc/doxygen dev-build/ninja dev-cpp/gtest dev-libs/boost dev-libs/expat dev-libs/openssl dev-util/cmake media-gfx/graphviz net-dns/unbound net-libs/zeromq dev-libs/libsodium dev-libs/hidapi dev-libs/libgcrypt`
+
+  - For Fedora
+
+	`sudo dnf install make automake cmake ninja gcc-c++ boost-devel graphviz doxygen unbound-devel pkgconfig openssl-devel libcurl-devel hidapi-devel libusb-devel zeromq-devel libgcrypt-devel`
 
 2. Install Qt:
 
-  *Note*: Qt 5.7 is the minimum version required to build the GUI. This makes **some** distributions (mostly based on debian, like Ubuntu 16.x or Linux Mint 18.x) obsolete. You can still build the GUI if you install an [official Qt release](https://wiki.qt.io/Install_Qt_5_on_Ubuntu), but this is not officially supported.
+  *Note*: The Qt 6.8 or newer requirement makes **some** distributions obsolete due to their repositories containing an older Qt version.
 
-  - For Ubuntu 17.10+
+ The recommended way is to install 6.8 or newer from the [official Qt installer](https://www.qt.io/download-qt-installer) or [compiling it yourself](https://doc.qt.io/qt-6/build-sources.html). This ensures you have the correct version. Higher versions *can* work but as it differs from our production build target, slight differences may occur.
 
-    `sudo apt install qtbase5-dev qt5-default qtdeclarative5-dev qml-module-qtquick-controls qml-module-qtquick-controls2 qml-module-qtquick-dialogs qml-module-qtquick-xmllistmodel qml-module-qt-labs-settings qml-module-qt-labs-folderlistmodel qttools5-dev-tools qml-module-qtquick-templates2`
+The following instructions will fetch Qt from your distribution's repositories instead. Take note of what version it installs. Your mileage may vary.
+
+  - For Debian distributions (Debian, Ubuntu, Mint, Tails...)
+
+    `sudo apt install qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools qml6-module-qtcore qml6-module-qtqml qml6-module-qtqml-models qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-dialogs qml6-module-qtquick-effects qml6-module-qtquick-layouts qml6-module-qtquick-shapes qml6-module-qtquick-window qml6-module-qt-labs-folderlistmodel qml6-module-qt-labs-platform`
 
   - For Gentoo
+  
+   
+    The *qml* USE flag must be enabled.
 
-    `sudo emerge dev-qt/qtcore:5 dev-qt/qtdeclarative:5 dev-qt/qtquickcontrols:5 dev-qt/qtquickcontrols2:5 dev-qt/qtgraphicaleffects:5`
+    `sudo emerge dev-qt/qtbase:6 dev-qt/qtdeclarative:6 dev-qt/qtsvg:6 dev-qt/qttools:6`
 
   - Optional : To build the flag `WITH_SCANNER`
 
-    - For Ubuntu
+    - For Debian distributions (Debian, Ubuntu, Mint, Tails...)
 
-      `sudo apt install qtmultimedia5-dev qml-module-qtmultimedia libzbar-dev`
+      `sudo apt install qt6-multimedia-dev qml6-module-qtmultimedia`
 
-    - For Gentoo
+    - For Gentoo      
 
-      The *qml* USE flag must be enabled.
-
-      `emerge dev-qt/qtmultimedia:5 media-gfx/zbar`
+      `emerge dev-qt/qtmultimedia:6`
 
 
 3. Clone repository
 
-    `git clone https://github.com/monero-project/monero-gui.git`
+    ```
+    git clone --recursive https://github.com/monero-project/monero-gui.git
+    cd monero-gui
+    ```
 
 4. Build
 
     ```
-    cd monero-gui
-    QT_SELECT=5 ./build.sh
+    make release
     ```
+
+    \* Add `CMAKE_PREFIX_PATH` environment variable to set a custom Qt install directory, e.g. `CMAKE_PREFIX_PATH=$HOME/Qt/6.8.3/gcc_64 make release`
+    \* Set `CMAKE_BUILD_PARALLEL_LEVEL` to control the number of parallel build jobs, e.g. `CMAKE_BUILD_PARALLEL_LEVEL=4 make release`
 
 The executable can be found in the build/release/bin folder.
 
-### On OS X:
+### Building on OS X
 
 1. Install Xcode from AppStore
 
@@ -127,60 +305,32 @@ The executable can be found in the build/release/bin folder.
 
 3. Install [monero](https://github.com/monero-project/monero) dependencies:
 
-  `brew install boost --c++11`
-
-  `brew install openssl` - to install openssl headers
-
-  `brew install pkgconfig`
-
-  `brew install cmake`
-
-  `brew install zeromq`
-
-  *Note*: If cmake can not find zmq.hpp file on OS X, installing `zmq.hpp` from https://github.com/zeromq/cppzmq to `/usr/local/include` should fix that error.
+  `brew install cmake ninja pkg-config openssl boost unbound hidapi zmq libpgm libsodium expat protobuf libgcrypt`
 
 4. Install Qt:
 
-  `brew install qt5`  (or download QT 5.8+ from [qt.io](https://www.qt.io/download-open-source/))
+  `brew install qt`  (or download Qt 6.8+ from [qt.io](https://www.qt.io/download-open-source/))
 
-  If you have an older version of Qt installed via homebrew, you can force it to use 5.x like so:
-  
-  `brew link --force --overwrite qt5`
+5. Grab an up-to-date copy of the monero-gui repository
 
-5. Add the Qt bin directory to your path
+   ```
+   git clone --recursive https://github.com/monero-project/monero-gui.git
+   cd monero-gui
+   ```
 
-    Example: `export PATH=$PATH:$HOME/Qt/5.8/clang_64/bin`
+6. Start the build
 
-    This is the directory where Qt 5.x is installed on **your** system
-
-6. Grab an up-to-date copy of the monero-gui repository
-
-  `git clone https://github.com/monero-project/monero-gui.git`
-
-7. Go into the repository
-
-  `cd monero-gui`
-
-8. Start the build
-
-  `./build.sh`
+    ```
+    make release
+    ```
+    \* Add `CMAKE_PREFIX_PATH` environment variable to set a custom Qt install directory, e.g. `CMAKE_PREFIX_PATH=$HOME/Qt/6.8.3/macos make release`
+    \* Set `CMAKE_BUILD_PARALLEL_LEVEL` to control the number of parallel build jobs, e.g. `CMAKE_BUILD_PARALLEL_LEVEL=4 make release`
 
 The executable can be found in the `build/release/bin` folder.
 
-**Note:** Workaround for "ERROR: Xcode not set up properly"
+For building an application bundle see `DEPLOY.md`.
 
-Edit `$HOME/Qt/5.8/clang_64/mkspecs/features/mac/default_pre.prf`
-
-replace
-`isEmpty($$list($$system("/usr/bin/xcrun -find xcrun 2>/dev/null")))`
-
-with
-`isEmpty($$list($$system("/usr/bin/xcrun -find xcodebuild 2>/dev/null")))`
-
-More info: http://stackoverflow.com/a/35098040/1683164
-
-
-### On Windows:
+### Building on Windows
 
 The Monero GUI on Windows is 64 bits only; 32-bit Windows GUI builds are not officially supported anymore.
 
@@ -191,24 +341,18 @@ The Monero GUI on Windows is 64 bits only; 32-bit Windows GUI builds are not off
 3. Install MSYS2 packages for Monero dependencies; the needed 64-bit packages have `x86_64` in their names
 
     ```
-    pacman -S mingw-w64-x86_64-toolchain make mingw-w64-x86_64-cmake mingw-w64-x86_64-boost mingw-w64-x86_64-openssl mingw-w64-x86_64-zeromq mingw-w64-x86_64-libsodium mingw-w64-x86_64-hidapi
+    pacman -S mingw-w64-x86_64-toolchain make mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-boost mingw-w64-x86_64-openssl mingw-w64-x86_64-zeromq mingw-w64-x86_64-libsodium mingw-w64-x86_64-hidapi mingw-w64-x86_64-protobuf-c mingw-w64-x86_64-libusb mingw-w64-x86_64-libgcrypt mingw-w64-x86_64-unbound mingw-w64-x86_64-pcre mingw-w64-x86_64-angleproject
     ```
 
     You find more details about those dependencies in the [Monero documentation](https://github.com/monero-project/monero). Note that that there is no more need to compile Boost from source; like everything else, you can install it now with a MSYS2 package.
 
-4. Install Qt5
+4. Install Qt6
 
     ```
-    pacman -S mingw-w64-x86_64-qt5
+    pacman -S mingw-w64-x86_64-qt6-base mingw-w64-x86_64-qt6-declarative mingw-w64-x86_64-qt6-svg mingw-w64-x86_64-qt6-tools
     ```
 
     There is no more need to download some special installer from the Qt website, the standard MSYS2 package for Qt will do in almost all circumstances.
-
-    **Note:** There is a known issue that GUI won't lauch properly when building tag v0.13.0.3 with Qt 5.11.2.
-    
-    If your encounter issue with that, please remove current Qt by: `pacman -R mingw-w64-x86_64-qt5`
-    
-    And install 5.11.1 instead by: `pacman -U http://repo.msys2.org/mingw/x86_64/mingw-w64-x86_64-qt5-5.11.1-3-any.pkg.tar.xz`
 
 5. Install git
 
@@ -219,16 +363,17 @@ The Monero GUI on Windows is 64 bits only; 32-bit Windows GUI builds are not off
 6. Clone repository
 
     ```
-    git clone https://github.com/monero-project/monero-gui.git
+    git clone --recursive https://github.com/monero-project/monero-gui.git
+    cd monero-gui
     ```
 
 7. Build
 
     ```
-    cd monero-gui
-    ./build.sh
-    cd build
-    make deploy
+    make release-win64
+    cd build/release
+    cmake --build . --target deploy
     ```
+    \* Set `CMAKE_BUILD_PARALLEL_LEVEL` to control the number of parallel build jobs, e.g. `CMAKE_BUILD_PARALLEL_LEVEL=4 make release-win64`
 
-The executable can be found in the `.\release\bin` directory.
+The executable can be found in the `.\bin` directory.

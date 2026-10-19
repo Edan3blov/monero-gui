@@ -1,0 +1,256 @@
+FROM ubuntu:20.04
+
+ARG THREADS=1
+ARG QT_VERSION=v6.8.5-lts-lgpl
+ARG QT_COMMIT=a5f4a849af9903bc8a9dd3c0d7f79e5924f70e45
+
+ENV CFLAGS="-fPIC"
+ENV CPPFLAGS="-fPIC"
+ENV CXXFLAGS="-fPIC"
+ENV SOURCE_DATE_EPOCH=1397818193
+
+ENV QT_PREFIX=/depends/x86_64-linux-gnu
+
+ENV PATH="${QT_PREFIX}/bin:${PATH}"
+ENV CMAKE_PREFIX_PATH="${QT_PREFIX}"
+
+RUN apt update && \
+    DEBIAN_FRONTEND=noninteractive apt install -y \
+    aria2 automake autopoint bison bzip2 ca-certificates curl gettext git g++ make \
+    gperf libarchive-tools libgl1-mesa-dev libglib2.0-dev libpng-dev libpthread-stubs0-dev \
+    libtool-bin libudev-dev mesa-common-dev \
+    ninja-build pkg-config python3 python-is-python3 wget xutils-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN git clone -b v0.18.5.4 --depth 1 https://github.com/monero-project/monero && \
+    cd monero && \
+    git reset --hard 85f036ba7019cd36f08e8a38a27c37ea7b522618 && \
+    cp -a contrib/depends / && \
+    cd .. && \
+    rm -rf monero
+
+# TODO: Remove this workaround once a better solution is found.
+RUN sed -i 's|--openssldir=$(host_prefix)/etc/openssl|--openssldir=/etc/ssl|' /depends/packages/openssl.mk && \
+    make -j"$THREADS" -C /depends HOST=x86_64-linux-gnu
+
+# Use the pinned upstream CMake binary without changing the compiler or glibc
+# baseline. The Linux x86_64 binaries require glibc 2.17 or newer.
+RUN wget -q https://github.com/Kitware/CMake/releases/download/v4.3.3/cmake-4.3.3-linux-x86_64.tar.gz && \
+    echo "927b2368a946c37269c3a66225ab00544e756459cdd0b5d0da438694fb9ff802  cmake-4.3.3-linux-x86_64.tar.gz" | sha256sum -c && \
+    tar -xzf cmake-4.3.3-linux-x86_64.tar.gz -C /usr/local --strip-components=1 && \
+    rm cmake-4.3.3-linux-x86_64.tar.gz && \
+    cmake --version
+
+RUN git clone -b xorgproto-2020.1 --depth 1 https://gitlab.freedesktop.org/xorg/proto/xorgproto && \
+    cd xorgproto && \
+    git reset --hard c62e8203402cafafa5ba0357b6d1c019156c9f36 && \
+    ./autogen.sh && \
+    make -j$THREADS && \
+    make -j$THREADS install && \
+    rm -rf $(pwd)
+
+RUN git clone -b xcb-proto-1.17.0 --depth 1 https://gitlab.freedesktop.org/xorg/proto/xcbproto && \
+    cd xcbproto && \
+    git reset --hard 77d7fc04da729ddc5ed4aacf30253726fac24dca && \
+    ./autogen.sh && \
+    make -j$THREADS && \
+    make -j$THREADS install && \
+    rm -rf $(pwd)
+
+RUN git clone -b libXau-1.0.9 --depth 1 https://gitlab.freedesktop.org/xorg/lib/libxau && \
+    cd libxau && \
+    git reset --hard d9443b2c57b512cfb250b35707378654d86c7dea && \
+    ./autogen.sh --enable-shared --disable-static && \
+    make -j$THREADS && \
+    make -j$THREADS install && \
+    rm -rf $(pwd)
+
+RUN git clone -b libxcb-1.17.0 --depth 1 https://gitlab.freedesktop.org/xorg/lib/libxcb && \
+    cd libxcb && \
+    git reset --hard 622152ee42a310876f10602601206954b8d0613e && \
+    ./autogen.sh --enable-shared --disable-static && \
+    make -j$THREADS && \
+    make -j$THREADS install && \
+    make -j$THREADS clean && \
+    rm /usr/local/lib/libxcb-xinerama.so && \
+    ./autogen.sh --disable-shared --enable-static && \
+    make -j$THREADS && \
+    cp src/.libs/libxcb-xinerama.a /usr/local/lib/ && \
+    rm -rf $(pwd)
+
+RUN git clone -b 0.4.0 --depth 1 https://gitlab.freedesktop.org/xorg/lib/libxcb-util && \
+    cd libxcb-util && \
+    git reset --hard acf790d7752f36e450d476ad79807d4012ec863b && \
+    git submodule init && \
+    git clone --depth 1 https://gitlab.freedesktop.org/xorg/util/xcb-util-m4 m4 && \
+    git -C m4 reset --hard c617eee22ae5c285e79e81ec39ce96862fd3262f && \
+    ./autogen.sh --enable-shared --disable-static && \
+    make -j$THREADS && \
+    make -j$THREADS install && \
+    rm -rf $(pwd)
+
+RUN git clone -b 0.4.0 --depth 1 https://gitlab.freedesktop.org/xorg/lib/libxcb-image && \
+    cd libxcb-image && \
+    git reset --hard d882052fb2ce439c6483fce944ba8f16f7294639 && \
+    git submodule init && \
+    git clone --depth 1 https://gitlab.freedesktop.org/xorg/util/xcb-util-m4 m4 && \
+    git -C m4 reset --hard c617eee22ae5c285e79e81ec39ce96862fd3262f && \
+    ./autogen.sh --enable-shared --disable-static && \
+    make -j$THREADS && \
+    make -j$THREADS install && \
+    rm -rf $(pwd)
+
+RUN git clone -b 0.4.0 --depth 1 https://gitlab.freedesktop.org/xorg/lib/libxcb-keysyms && \
+    cd libxcb-keysyms && \
+    git reset --hard 0e51ee5570a6a80bdf98770b975dfe8a57f4eeb1 && \
+    git submodule init && \
+    git clone --depth 1 https://gitlab.freedesktop.org/xorg/util/xcb-util-m4 m4 && \
+    git -C m4 reset --hard c617eee22ae5c285e79e81ec39ce96862fd3262f && \
+    ./autogen.sh --enable-shared --disable-static && \
+    make -j$THREADS && \
+    make -j$THREADS install && \
+    rm -rf $(pwd)
+
+RUN git clone -b 0.3.9 --depth 1 https://gitlab.freedesktop.org/xorg/lib/libxcb-render-util && \
+    cd libxcb-render-util && \
+    git reset --hard 0317caf63de532fd7a0493ed6afa871a67253747 && \
+    git submodule init && \
+    git clone --depth 1 https://gitlab.freedesktop.org/xorg/util/xcb-util-m4 m4 && \
+    git -C m4 reset --hard c617eee22ae5c285e79e81ec39ce96862fd3262f && \
+    ./autogen.sh --enable-shared --disable-static && \
+    make -j$THREADS && \
+    make -j$THREADS install && \
+    rm -rf $(pwd)
+
+RUN git clone -b 0.4.1 --depth 1 https://gitlab.freedesktop.org/xorg/lib/libxcb-wm && \
+    cd libxcb-wm && \
+    git reset --hard 24eb17df2e1245885e72c9d4bbb0a0f69f0700f2 && \
+    git submodule init && \
+    git clone --depth 1 https://gitlab.freedesktop.org/xorg/util/xcb-util-m4 m4 && \
+    git -C m4 reset --hard c617eee22ae5c285e79e81ec39ce96862fd3262f && \
+    ./autogen.sh --enable-shared --disable-static && \
+    make -j$THREADS && \
+    make -j$THREADS install && \
+    rm -rf $(pwd)
+
+RUN git clone -b xkbcommon-0.5.0 --depth 1 https://github.com/xkbcommon/libxkbcommon && \
+    cd libxkbcommon && \
+    git reset --hard c43c3c866eb9d52cd8f61e75cbef1c30d07f3a28 && \
+    ./autogen.sh --prefix=/usr --enable-shared --disable-static --enable-x11 --disable-docs && \
+    make -j$THREADS && \
+    make -j$THREADS install && \
+    rm -rf $(pwd)
+
+RUN git clone -b v1.3 --depth 1 https://github.com/madler/zlib && \
+    cd zlib && \
+    git reset --hard 09155eaa2f9270dc4ed1fa13e2b4b2613e6e4851 && \
+    ./configure --static && \
+    make -j$THREADS && \
+    make -j$THREADS install && \
+    rm -rf $(pwd)
+
+RUN git clone -b VER-2-10-2 --depth 1 https://gitlab.freedesktop.org/freetype/freetype.git && \
+    cd freetype && \
+    git reset --hard 132f19b779828b194b3fede187cee719785db4d8 && \
+    ./autogen.sh && \
+    ./configure --disable-shared --enable-static --with-zlib=no && \
+    make -j$THREADS && \
+    make -j$THREADS install && \
+    rm -rf $(pwd)
+
+RUN wget https://github.com/libexpat/libexpat/releases/download/R_2_4_8/expat-2.4.8.tar.bz2 && \
+    echo "a247a7f6bbb21cf2ca81ea4cbb916bfb9717ca523631675f99b3d4a5678dcd16 expat-2.4.8.tar.bz2" | sha256sum -c && \
+    tar -xf expat-2.4.8.tar.bz2 && \
+    rm expat-2.4.8.tar.bz2 && \
+    cd expat-2.4.8 && \
+    ./configure --enable-static --disable-shared --prefix=/usr && \
+    make -j$THREADS && \
+    make -j$THREADS install && \
+    rm -rf $(pwd)
+
+RUN git clone -b 2.13.92 --depth 1 https://gitlab.freedesktop.org/fontconfig/fontconfig && \
+    cd fontconfig && \
+    git reset --hard b1df1101a643ae16cdfa1d83b939de2497b1bf27 && \
+    ./autogen.sh --disable-shared --enable-static --sysconfdir=/etc --localstatedir=/var && \
+    make -j$THREADS && \
+    make -j$THREADS install && \
+    rm -rf $(pwd)
+
+RUN git clone -b release-64-2 --depth 1 https://github.com/unicode-org/icu && \
+    cd icu/icu4c/source && \
+    git reset --hard e2d85306162d3a0691b070b4f0a73e4012433444 && \
+    ./configure --disable-shared --enable-static --disable-tests --disable-samples && \
+    make -j$THREADS && \
+    make -j$THREADS install && \
+    rm -rf $(pwd)
+
+RUN git clone -b xcb-util-cursor-0.1.4 --depth 1 https://gitlab.freedesktop.org/xorg/lib/libxcb-cursor && \
+    cd libxcb-cursor && \
+    git reset --hard 3d7e713e85af18d7e52cafdc9d20a2715048dee7 && \
+    git submodule init && \
+    git clone --depth 1 https://gitlab.freedesktop.org/xorg/util/xcb-util-m4 m4 && \
+    git -C m4 reset --hard c617eee22ae5c285e79e81ec39ce96862fd3262f && \
+    ./autogen.sh --enable-shared --disable-static && \
+    make -j$THREADS && \
+    make -j$THREADS install && \
+    rm -rf $(pwd)
+
+# CMake's FindFontconfig target does not expose the private dependencies of a
+# static Fontconfig build. Bundle them so Qt tools and downstream static links
+# do not depend on library ordering or pkg-config-specific metadata.
+RUN printf 'create /tmp/libfontconfig.a\naddlib /usr/local/lib/libfontconfig.a\naddlib /usr/local/lib/libfreetype.a\naddlib /usr/lib/libexpat.a\nsave\nend\n' | ar -M && \
+    mv /tmp/libfontconfig.a /usr/local/lib/libfontconfig.a && \
+    ldconfig
+
+ARG QT_UNITY_BUILD=ON
+
+RUN rm -f /usr/lib/x86_64-linux-gnu/libX11.a \
+        /usr/lib/x86_64-linux-gnu/libXext.a \
+        /usr/lib/x86_64-linux-gnu/libX11-xcb.a && \
+    git clone https://github.com/qt/qt5.git -b ${QT_VERSION} --depth 1 qt-sources && \
+    git -C qt-sources reset --hard ${QT_COMMIT} && \
+    sed -ri s/\(Libs:.*\)/\\1\ -lexpat/ /usr/local/lib/pkgconfig/fontconfig.pc && \
+    sed -ri s/\(Libs:.*\)/\\1\ -lz/ /usr/local/lib/pkgconfig/freetype2.pc && \
+    sed -ri s/\(Libs:.*\)/\\1\ -lXau/ /usr/local/lib/pkgconfig/xcb.pc && \
+    mkdir qt-build && \
+    cd qt-build && \
+    ../qt-sources/configure -init-submodules \
+    -submodules qtbase,qtdeclarative,qtshadertools,qtsvg,qttools \
+    -prefix ${QT_PREFIX} -opensource -confirm-license -release -static -no-avx \
+    -opengl desktop -xcb -no-feature-xlib -system-freetype -fontconfig -no-feature-eglfs -no-glib \
+    -no-dbus -no-feature-qml-worker-script -no-feature-linuxfb -no-openssl -no-feature-sql -no-feature-kms \
+    -no-feature-testlib -no-feature-quick-particles -no-feature-qml-xmllistmodel -no-feature-qml-debug \
+    -no-feature-quickcontrols2-imagine -no-feature-quickcontrols2-universal -no-feature-quickcontrols2-fluentwinui3 \
+    -no-feature-printsupport -no-feature-pdf -no-feature-vulkan -no-feature-sessionmanager -no-feature-gtk3 \
+    -no-feature-assistant -no-feature-clang -no-feature-clangcpp -no-feature-qdoc -no-feature-designer -no-feature-distancefieldgenerator \
+    -no-feature-pixeltool -no-feature-qdbus -no-feature-qtattributionsscanner -no-feature-qtdiag -no-feature-qtplugininfo \
+    -no-feature-http -no-feature-ssl -no-feature-dtls -no-feature-ocsp -no-feature-networkproxy -no-feature-socks5 -no-feature-networkdiskcache \
+    -no-feature-brotli -no-feature-dnslookup -no-feature-topleveldomain -no-feature-udpsocket -no-feature-system-proxies \
+    -no-feature-sctp -skip qtactiveqt -skip qtlanguageserver -skip qtquicktimeline -qt-harfbuzz -qt-libjpeg -qt-libpng -qt-pcre -qt-zlib \
+    -nomake examples -nomake tests \
+    -- -DQT_UNITY_BUILD="${QT_UNITY_BUILD}" && \
+    cmake --build . --parallel $THREADS && \
+    cmake --install . && \
+    cd .. && \
+    rm -rf qt-build qt-sources
+
+RUN git clone -b libgpg-error-1.45 --depth 1 https://github.com/gpg/libgpg-error && \
+    cd libgpg-error && \
+    git reset --hard dbac537e5e865fb6f3aa8596d213aa8c47a9dea1 && \
+    ./autogen.sh && \
+    ./configure --disable-shared --enable-static --disable-doc --disable-tests --prefix="${QT_PREFIX}" && \
+    make -j$THREADS && \
+    make -j$THREADS install && \
+    rm -rf $(pwd)
+
+RUN git clone -b libgcrypt-1.10.1 --depth 1 https://github.com/gpg/libgcrypt && \
+    cd libgcrypt && \
+    git reset --hard ae0e567820c37f9640440b3cff77d7c185aa6742 && \
+    ./autogen.sh && \
+    ./configure --disable-shared --enable-static --disable-doc --with-gpg-error-prefix="${QT_PREFIX}" --prefix="${QT_PREFIX}" && \
+    make -j$THREADS && \
+    make -j$THREADS install && \
+    rm -rf $(pwd)
+
+COPY docker.gitconfig /etc/monero-gui.gitconfig
+RUN git config --system --add include.path /etc/monero-gui.gitconfig

@@ -1,13 +1,50 @@
+// Copyright (c) 2014-2024, The Monero Project
+//
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without modification, are
+// permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice, this list of
+//    conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice, this list
+//    of conditions and the following disclaimer in the documentation and/or other
+//    materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its contributors may be
+//    used to endorse or promote products derived from this software without specific
+//    prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY
+// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
+// THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+// STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
+// THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 #include "Wallet.h"
+
+#include <chrono>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <vector>
+
 #include "PendingTransaction.h"
 #include "UnsignedTransaction.h"
 #include "TransactionHistory.h"
 #include "AddressBook.h"
 #include "Subaddress.h"
+#include "SubaddressAccount.h"
 #include "model/TransactionHistoryModel.h"
 #include "model/TransactionHistorySortFilterModel.h"
 #include "model/AddressBookModel.h"
 #include "model/SubaddressModel.h"
+#include "model/SubaddressAccountModel.h"
 #include "wallet/api/wallet2_api.h"
 
 #include <QFile>
@@ -18,64 +55,34 @@
 #include <QtConcurrent/QtConcurrent>
 #include <QList>
 #include <QVector>
-#include <QMutex>
 #include <QMutexLocker>
+
+#include "qt/ScopeGuard.h"
 
 namespace {
     static const int DAEMON_BLOCKCHAIN_HEIGHT_CACHE_TTL_SECONDS = 5;
     static const int DAEMON_BLOCKCHAIN_TARGET_HEIGHT_CACHE_TTL_SECONDS = 30;
     static const int WALLET_CONNECTION_STATUS_CACHE_TTL_SECONDS = 5;
+
+    static constexpr char ATTRIBUTE_SUBADDRESS_ACCOUNT[] ="gui.subaddress_account";
+
+    QVariantMap messageSignatureResultToVariantMap(const Monero::Wallet::MessageSignatureResult &result)
+    {
+        QString type = "invalid";
+        switch (result.type) {
+        case Monero::Wallet::MessageSignatureType_Spend: type = "spend"; break;
+        case Monero::Wallet::MessageSignatureType_View: type = "view"; break;
+        default: break;
+        }
+
+        return {
+            {"valid", result.valid},
+            {"version", result.version},
+            {"old", result.old},
+            {"type", type}
+        };
+    }
 }
-
-class WalletListenerImpl : public  Monero::WalletListener
-{
-public:
-    WalletListenerImpl(Wallet * w)
-        : m_wallet(w)
-    {
-
-    }
-
-    virtual void moneySpent(const std::string &txId, uint64_t amount)
-    {
-        qDebug() << __FUNCTION__;
-        emit m_wallet->moneySpent(QString::fromStdString(txId), amount);
-    }
-
-
-    virtual void moneyReceived(const std::string &txId, uint64_t amount)
-    {
-        qDebug() << __FUNCTION__;
-        emit m_wallet->moneyReceived(QString::fromStdString(txId), amount);
-    }
-
-    virtual void unconfirmedMoneyReceived(const std::string &txId, uint64_t amount)
-    {
-        qDebug() << __FUNCTION__;
-        emit m_wallet->unconfirmedMoneyReceived(QString::fromStdString(txId), amount);
-    }
-
-    virtual void newBlock(uint64_t height)
-    {
-        // qDebug() << __FUNCTION__;
-        emit m_wallet->newBlock(height, m_wallet->daemonBlockChainTargetHeight());
-    }
-
-    virtual void updated()
-    {
-        emit m_wallet->updated();
-    }
-
-    // called when wallet refreshed by background thread or explicitly
-    virtual void refreshed()
-    {
-        qDebug() << __FUNCTION__;
-        emit m_wallet->refreshed();
-    }
-
-private:
-    Wallet * m_wallet;
-};
 
 Wallet::Wallet(QObject * parent)
     : Wallet(nullptr, parent)
@@ -110,36 +117,103 @@ NetworkType::Type Wallet::nettype() const
 
 void Wallet::updateConnectionStatusAsync()
 {
-    QFuture<Monero::Wallet::ConnectionStatus> future = QtConcurrent::run(m_walletImpl, &Monero::Wallet::connected);
-    QFutureWatcher<Monero::Wallet::ConnectionStatus> *connectionWatcher = new QFutureWatcher<Monero::Wallet::ConnectionStatus>();
-
-    connect(connectionWatcher, &QFutureWatcher<Monero::Wallet::ConnectionStatus>::finished, [=]() {
-        QFuture<Monero::Wallet::ConnectionStatus> future = connectionWatcher->future();
-        connectionWatcher->deleteLater();
-        ConnectionStatus newStatus = static_cast<ConnectionStatus>(future.result());
-        if (newStatus != m_connectionStatus || !m_initialized) {
-            m_initialized = true;
-            m_connectionStatus = newStatus;
-            qDebug() << "NEW STATUS " << newStatus;
-            emit connectionStatusChanged(newStatus);
+    m_scheduler.run([this] {
+        qDebug() << "updateConnectionStatusAsync current status:" << m_connectionStatus;
+        if (m_connectionStatus == Wallet::ConnectionStatus_Disconnected)
+        {
+            setConnectionStatus(ConnectionStatus_Connecting);
+        }
+        ConnectionStatus newStatus = static_cast<ConnectionStatus>(m_walletImpl->connected());
+        qDebug() << "Newest wallet status:" << newStatus;
+        if (m_connectionStatus != newStatus)
+        {
+            setConnectionStatus(newStatus);
+            if (newStatus == ConnectionStatus_Connected)
+            {
+                startRefresh();
+            }
         }
         // Release lock
         m_connectionStatusRunning = false;
+        m_connectionStatusTime.restart();
     });
-    connectionWatcher->setFuture(future);
 }
 
 Wallet::ConnectionStatus Wallet::connected(bool forceCheck)
 {
+    if (!m_initialized || m_initializing)
+    {
+        return ConnectionStatus_Connecting;
+    }
+
     // cache connection status
-    if (forceCheck || !m_initialized || (m_connectionStatusTime.elapsed() / 1000 > m_connectionStatusTtl && !m_connectionStatusRunning) || m_connectionStatusTime.elapsed() > 30000) {
+    if (forceCheck || (m_connectionStatusTime.elapsed() / 1000 > m_connectionStatusTtl && !m_connectionStatusRunning) || m_connectionStatusTime.elapsed() > 30000) {
         qDebug() << "Checking connection status";
         m_connectionStatusRunning = true;
-        m_connectionStatusTime.restart();
         updateConnectionStatusAsync();
     }
 
     return m_connectionStatus;
+}
+
+bool Wallet::disconnected() const
+{
+    return m_disconnected;
+}
+
+bool Wallet::refreshing() const
+{
+    return m_refreshing;
+}
+
+void Wallet::refreshingSet(bool value)
+{
+    if (m_refreshing.exchange(value) != value)
+    {
+        emit refreshingChanged();
+    }
+}
+
+void Wallet::setConnectionStatus(ConnectionStatus value)
+{
+    if (m_connectionStatus == value)
+    {
+        return;
+    }
+
+    m_connectionStatus = value;
+    emit connectionStatusChanged(value);
+
+    bool disconnected = value != Wallet::ConnectionStatus_Connected;
+
+    if (m_disconnected != disconnected)
+    {
+        m_disconnected = disconnected;
+        emit disconnectedChanged();
+    }
+}
+
+QString Wallet::getProxyAddress() const
+{
+    QMutexLocker locker(&m_proxyMutex);
+    return m_proxyAddress;
+}
+
+void Wallet::setProxyAddress(QString address)
+{
+    m_scheduler.run([this, address] {
+        {
+            QMutexLocker locker(&m_proxyMutex);
+
+            if (!m_walletImpl->setProxy(address.toStdString()))
+            {
+                qCritical() << "failed to set proxy" << address;
+            }
+
+            m_proxyAddress = address;
+        }
+        emit proxyAddressChanged();
+    });
 }
 
 bool Wallet::synchronized() const
@@ -164,15 +238,25 @@ QString Wallet::address(quint32 accountIndex, quint32 addressIndex) const
 
 QString Wallet::path() const
 {
-    return QString::fromStdString(m_walletImpl->path());
+    return QDir::toNativeSeparators(QString::fromStdString(m_walletImpl->path()));
 }
 
-bool Wallet::store(const QString &path)
+void Wallet::storeAsync(const QJSValue &callback, const QString &path /* = "" */)
 {
-    return m_walletImpl->store(path.toStdString());
+    const auto future = m_scheduler.run(
+        [this, path] {
+            QMutexLocker locker(&m_asyncMutex);
+
+            return QJSValueList{QJSValue(m_walletImpl->store(path.toStdString()))};
+        },
+        callback);
+    if (!future.first)
+    {
+        QJSValue(callback).call(QJSValueList{QJSValue(false)});
+    }
 }
 
-bool Wallet::init(const QString &daemonAddress, quint64 upperTransactionLimit, bool isRecovering, bool isRecoveringFromDevice, quint64 restoreHeight)
+bool Wallet::init(const QString &daemonAddress, const QString &daemonUsername, const QString &daemonPassword, bool trustedDaemon, quint64 upperTransactionLimit, bool isRecovering, bool isRecoveringFromDevice, quint64 restoreHeight, const QString& proxyAddress)
 {
     qDebug() << "init non async";
     if (isRecovering){
@@ -186,7 +270,21 @@ bool Wallet::init(const QString &daemonAddress, quint64 upperTransactionLimit, b
     if (isRecovering || isRecoveringFromDevice) {
         m_walletImpl->setRefreshFromBlockHeight(restoreHeight);
     }
-    m_walletImpl->init(daemonAddress.toStdString(), upperTransactionLimit, m_daemonUsername.toStdString(), m_daemonPassword.toStdString());
+
+    {
+        QMutexLocker locker(&m_proxyMutex);
+
+        if (!m_walletImpl->init(daemonAddress.toStdString(), upperTransactionLimit, daemonUsername.toStdString(), daemonPassword.toStdString(), false, false, proxyAddress.toStdString()))
+        {
+            return false;
+        }
+
+
+        m_proxyAddress = proxyAddress;
+    }
+    emit proxyAddressChanged();
+
+    setTrustedDaemon(trustedDaemon);
     return true;
 }
 
@@ -197,32 +295,60 @@ void Wallet::setDaemonLogin(const QString &daemonUsername, const QString &daemon
     m_daemonPassword = daemonPassword;
 }
 
-void Wallet::initAsync(const QString &daemonAddress, quint64 upperTransactionLimit, bool isRecovering, bool isRecoveringFromDevice, quint64 restoreHeight)
+void Wallet::initAsync(
+    const QString &daemonAddress,
+    bool trustedDaemon /* = false */,
+    quint64 upperTransactionLimit /* = 0 */,
+    bool isRecovering /* = false */,
+    bool isRecoveringFromDevice /* = false */,
+    quint64 restoreHeight /* = 0 */,
+    const QString &proxyAddress /* = "" */)
 {
     qDebug() << "initAsync: " + daemonAddress;
-    // Change status to disconnected if connected
-    if(m_connectionStatus != Wallet::ConnectionStatus_Disconnected) {
-        m_connectionStatus = Wallet::ConnectionStatus_Disconnected;
-        emit connectionStatusChanged(m_connectionStatus);
-    }
-
-    QFuture<bool> future = QtConcurrent::run(this, &Wallet::init,
-                                  daemonAddress, upperTransactionLimit, isRecovering, isRecoveringFromDevice, restoreHeight);
-    QFutureWatcher<bool> * watcher = new QFutureWatcher<bool>();
-
-    connect(watcher, &QFutureWatcher<bool>::finished,
-            this, [this, watcher, daemonAddress, upperTransactionLimit, isRecovering, restoreHeight]() {
-        QFuture<bool> future = watcher->future();
-        watcher->deleteLater();
-        if(future.result()){
+    m_initializing = true;
+    pauseRefresh();
+    const auto future = m_scheduler.run([this, daemonAddress, daemonUsername = m_daemonUsername, daemonPassword = m_daemonPassword, trustedDaemon, upperTransactionLimit, isRecovering, isRecoveringFromDevice, restoreHeight, proxyAddress] {
+        m_initialized = init(
+            daemonAddress,
+            daemonUsername,
+            daemonPassword,
+            trustedDaemon,
+            upperTransactionLimit,
+            isRecovering,
+            isRecoveringFromDevice,
+            restoreHeight,
+            proxyAddress);
+        m_initializing = false;
+        if (m_initialized)
+        {
             emit walletCreationHeightChanged();
-            qDebug() << "init async finished - starting refresh";
+            qDebug() << "init async finished: " + daemonAddress;
             connected(true);
-            m_walletImpl->startRefresh();
-
+        }
+        else
+        {
+            qCritical() << "Failed to initialize the wallet";
         }
     });
-    watcher->setFuture(future);
+    if (future.first)
+    {
+        setConnectionStatus(Wallet::ConnectionStatus_Connecting);
+    }
+}
+
+bool Wallet::isHwBacked() const
+{
+    return m_walletImpl->getDeviceType() != Monero::Wallet::Device_Software;
+}
+
+bool Wallet::isLedger() const
+{
+    return m_walletImpl->getDeviceType() == Monero::Wallet::Device_Ledger;
+}
+
+bool Wallet::isTrezor() const
+{
+    return m_walletImpl->getDeviceType() == Monero::Wallet::Device_Trezor;
 }
 
 //! create a view only wallet
@@ -249,6 +375,11 @@ bool Wallet::viewOnly() const
     return m_walletImpl->watchOnly();
 }
 
+quint64 Wallet::balance() const
+{
+    return balance(m_currentSubaddressAccount);
+}
+
 quint64 Wallet::balance(quint32 accountIndex) const
 {
     return m_walletImpl->balance(accountIndex);
@@ -257,6 +388,11 @@ quint64 Wallet::balance(quint32 accountIndex) const
 quint64 Wallet::balanceAll() const
 {
     return m_walletImpl->balanceAll();
+}
+
+quint64 Wallet::unlockedBalance() const
+{
+    return unlockedBalance(m_currentSubaddressAccount);
 }
 
 quint64 Wallet::unlockedBalance(quint32 accountIndex) const
@@ -278,8 +414,13 @@ void Wallet::switchSubaddressAccount(quint32 accountIndex)
     if (accountIndex < numSubaddressAccounts())
     {
         m_currentSubaddressAccount = accountIndex;
+        if (!setCacheAttribute(ATTRIBUTE_SUBADDRESS_ACCOUNT, QString::number(m_currentSubaddressAccount)))
+        {
+            qWarning() << "failed to set " << ATTRIBUTE_SUBADDRESS_ACCOUNT << " cache attribute";
+        }
         m_subaddress->refresh(m_currentSubaddressAccount);
         m_history->refresh(m_currentSubaddressAccount);
+        emit currentSubaddressAccountChanged();
     }
 }
 void Wallet::addSubaddressAccount(const QString& label)
@@ -306,6 +447,43 @@ QString Wallet::getSubaddressLabel(quint32 accountIndex, quint32 addressIndex) c
 void Wallet::setSubaddressLabel(quint32 accountIndex, quint32 addressIndex, const QString &label)
 {
     m_walletImpl->setSubaddressLabel(accountIndex, addressIndex, label.toStdString());
+    emit currentSubaddressAccountChanged();
+}
+void Wallet::deviceShowAddressAsync(quint32 accountIndex, quint32 addressIndex, const QString &paymentId)
+{
+    m_scheduler.run([this, accountIndex, addressIndex, paymentId] {
+        m_walletImpl->deviceShowAddress(accountIndex, addressIndex, paymentId.toStdString());
+        emit deviceShowAddressShowed();
+    });
+}
+
+void Wallet::refreshHeightAsync()
+{
+    m_scheduler.run([this] {
+        quint64 daemonHeight;
+        QPair<bool, QFuture<void>> daemonHeightFuture = m_scheduler.run([this, &daemonHeight] {
+            daemonHeight = daemonBlockChainHeight();
+        });
+        if (!daemonHeightFuture.first)
+        {
+            return;
+        }
+
+        quint64 targetHeight;
+        QPair<bool, QFuture<void>> targetHeightFuture = m_scheduler.run([this, &targetHeight] {
+            targetHeight = daemonBlockChainTargetHeight();
+        });
+        if (!targetHeightFuture.first)
+        {
+            return;
+        }
+
+        quint64 walletHeight = blockChainHeight();
+        daemonHeightFuture.second.waitForFinished();
+        targetHeightFuture.second.waitForFinished();
+
+        emit heightRefreshed(walletHeight, daemonHeight, targetHeight);
+    });
 }
 
 quint64 Wallet::blockChainHeight() const
@@ -342,9 +520,9 @@ quint64 Wallet::daemonBlockChainTargetHeight() const
     return m_daemonBlockChainTargetHeight;
 }
 
-bool Wallet::exportKeyImages(const QString& path)
+bool Wallet::exportKeyImages(const QString& path, bool all)
 {
-    return m_walletImpl->exportKeyImages(path.toStdString());
+    return m_walletImpl->exportKeyImages(path.toStdString(), all);
 }
 
 bool Wallet::importKeyImages(const QString& path)
@@ -352,69 +530,176 @@ bool Wallet::importKeyImages(const QString& path)
     return m_walletImpl->importKeyImages(path.toStdString());
 }
 
-bool Wallet::refresh()
-{
-    bool result = m_walletImpl->refresh();
-    m_history->refresh(currentSubaddressAccount());
-    m_subaddress->refresh(currentSubaddressAccount());
-    if (result)
-        emit updated();
-    return result;
+bool Wallet::exportOutputs(const QString& path, bool all) {
+    return m_walletImpl->exportOutputs(path.toStdString(), all);
 }
 
-void Wallet::refreshAsync()
-{
-    qDebug() << "refresh async";
-    m_walletImpl->refreshAsync();
+bool Wallet::importOutputs(const QString& path) {
+    return m_walletImpl->importOutputs(path.toStdString());
 }
 
-void Wallet::setAutoRefreshInterval(int seconds)
+bool Wallet::scanTransactions(const QVector<QString> &txids)
 {
-    m_walletImpl->setAutoRefreshInterval(seconds);
+    std::vector<std::string> c;
+    for (const auto &v : txids)
+    {
+        c.push_back(v.toStdString());
+    }
+    return m_walletImpl->scanTransactions(c);
 }
 
-int Wallet::autoRefreshInterval() const
+void Wallet::setupBackgroundSync(const Wallet::BackgroundSyncType background_sync_type, const QString &wallet_password)
 {
-    return m_walletImpl->autoRefreshInterval();
-}
+    qDebug() << "Setting up background sync";
+    bool refreshEnabled = m_refreshEnabled;
+    pauseRefresh();
 
-void Wallet::startRefresh() const
-{
-    m_walletImpl->startRefresh();
-}
-
-void Wallet::pauseRefresh() const
-{
-    m_walletImpl->pauseRefresh();
-}
-
-PendingTransaction *Wallet::createTransaction(const QString &dst_addr, const QString &payment_id,
-                                              quint64 amount, quint32 mixin_count,
-                                              PendingTransaction::Priority priority)
-{
-    std::set<uint32_t> subaddr_indices;
-    Monero::PendingTransaction * ptImpl = m_walletImpl->createTransaction(
-                dst_addr.toStdString(), payment_id.toStdString(), amount, mixin_count,
-                static_cast<Monero::PendingTransaction::Priority>(priority), currentSubaddressAccount(), subaddr_indices);
-    PendingTransaction * result = new PendingTransaction(ptImpl,0);
-    return result;
-}
-
-void Wallet::createTransactionAsync(const QString &dst_addr, const QString &payment_id,
-                               quint64 amount, quint32 mixin_count,
-                               PendingTransaction::Priority priority)
-{
-    QFuture<PendingTransaction*> future = QtConcurrent::run(this, &Wallet::createTransaction,
-                                  dst_addr, payment_id,amount, mixin_count, priority);
-    QFutureWatcher<PendingTransaction*> * watcher = new QFutureWatcher<PendingTransaction*>();
-
-    connect(watcher, &QFutureWatcher<PendingTransaction*>::finished,
-            this, [this, watcher,dst_addr,payment_id,mixin_count]() {
-        QFuture<PendingTransaction*> future = watcher->future();
-        watcher->deleteLater();
-        emit transactionCreated(future.result(),dst_addr,payment_id,mixin_count);
+    // run inside scheduler because of lag when stopping/starting refresh
+    m_scheduler.run([this, refreshEnabled, background_sync_type, wallet_password] {
+        m_walletImpl->setupBackgroundSync(
+            static_cast<Monero::Wallet::BackgroundSyncType>(background_sync_type),
+            wallet_password.toStdString(),
+            Monero::optional<std::string>());
+        if (refreshEnabled)
+            startRefresh();
+        emit backgroundSyncSetup();
     });
-    watcher->setFuture(future);
+}
+
+Wallet::BackgroundSyncType Wallet::getBackgroundSyncType() const
+{
+    return static_cast<BackgroundSyncType>(m_walletImpl->getBackgroundSyncType());
+}
+
+bool Wallet::isBackgroundWallet() const
+{
+    return m_walletImpl->isBackgroundWallet();
+}
+
+bool Wallet::isBackgroundSyncing() const
+{
+    return m_walletImpl->isBackgroundSyncing();
+}
+
+void Wallet::startBackgroundSync()
+{
+    qDebug() << "Starting background sync";
+    bool refreshEnabled = m_refreshEnabled;
+    pauseRefresh();
+
+    // run inside scheduler because of lag when stopping/starting refresh
+    m_scheduler.run([this, refreshEnabled] {
+        m_walletImpl->startBackgroundSync();
+        if (refreshEnabled)
+            startRefresh();
+        emit backgroundSyncStarted();
+    });
+}
+
+void Wallet::stopBackgroundSync(const QString &password)
+{
+    qDebug() << "Stopping background sync";
+    bool refreshEnabled = m_refreshEnabled;
+    pauseRefresh();
+
+    // run inside scheduler because of lag when stopping/starting refresh
+    m_scheduler.run([this, password, refreshEnabled] {
+        m_walletImpl->stopBackgroundSync(password.toStdString());
+        if (refreshEnabled)
+            startRefresh();
+        emit backgroundSyncStopped();
+    });
+}
+
+bool Wallet::refresh(bool historyAndSubaddresses /* = true */)
+{
+    refreshingSet(true);
+    const auto cleanup = sg::make_scope_guard([this]() noexcept {
+        refreshingSet(false);
+    });
+
+    {
+        QMutexLocker locker(&m_asyncMutex);
+
+        bool result = m_walletImpl->refresh();
+        if (historyAndSubaddresses)
+        {
+            m_history->refresh(currentSubaddressAccount());
+            m_subaddress->refresh(currentSubaddressAccount());
+            m_subaddressAccount->getAll();
+        }
+        if (result)
+            emit updated();
+        return result;
+    }
+}
+
+void Wallet::startRefresh()
+{
+    qDebug() << "Starting refresh";
+    m_refreshEnabled = true;
+    m_refreshNow = true;
+
+    if (!m_refreshThreadStarted.exchange(true))
+    {
+        try
+        {
+            startRefreshThread();
+        }
+        catch (...)
+        {
+            m_refreshThreadStarted.store(false);
+            throw;
+        }
+    }
+}
+
+void Wallet::pauseRefresh()
+{
+    qDebug() << "Pausing refresh";
+    m_refreshEnabled = false;
+}
+
+PendingTransaction *Wallet::createTransaction(
+    const QVector<QString> &destinationAddresses,
+    const QString &payment_id,
+    const QVector<QString> &destinationAmounts,
+    quint32 mixin_count,
+    PendingTransaction::Priority priority)
+{
+    std::vector<std::string> destinations;
+    for (const auto &address : destinationAddresses) {
+        destinations.push_back(address.toStdString());
+    }
+    std::vector<uint64_t> amounts;
+    for (const auto &amount : destinationAmounts) {
+        amounts.push_back(Monero::Wallet::amountFromString(amount.toStdString()));
+    }
+    std::set<uint32_t> subaddr_indices;
+    Monero::PendingTransaction *ptImpl = m_walletImpl->createTransactionMultDest(
+        destinations,
+        payment_id.toStdString(),
+        amounts,
+        mixin_count,
+        static_cast<Monero::PendingTransaction::Priority>(priority),
+        currentSubaddressAccount(),
+        subaddr_indices);
+    PendingTransaction *result = new PendingTransaction(ptImpl, 0);
+    return result;
+}
+
+void Wallet::createTransactionAsync(
+    const QVector<QString> &destinationAddresses,
+    const QString &payment_id,
+    const QVector<QString> &destinationAmounts,
+    quint32 mixin_count,
+    PendingTransaction::Priority priority,
+    quint64 requestId)
+{
+    m_scheduler.run([this, destinationAddresses, payment_id, destinationAmounts, mixin_count, priority, requestId] {
+        PendingTransaction *tx = createTransaction(destinationAddresses, payment_id, destinationAmounts, mixin_count, priority);
+        emit transactionCreated(tx, destinationAddresses, payment_id, mixin_count, requestId);
+    });
 }
 
 PendingTransaction *Wallet::createTransactionAll(const QString &dst_addr, const QString &payment_id,
@@ -430,19 +715,13 @@ PendingTransaction *Wallet::createTransactionAll(const QString &dst_addr, const 
 
 void Wallet::createTransactionAllAsync(const QString &dst_addr, const QString &payment_id,
                                quint32 mixin_count,
-                               PendingTransaction::Priority priority)
+                               PendingTransaction::Priority priority,
+                               quint64 requestId)
 {
-    QFuture<PendingTransaction*> future = QtConcurrent::run(this, &Wallet::createTransactionAll,
-                                  dst_addr, payment_id, mixin_count, priority);
-    QFutureWatcher<PendingTransaction*> * watcher = new QFutureWatcher<PendingTransaction*>();
-
-    connect(watcher, &QFutureWatcher<PendingTransaction*>::finished,
-            this, [this, watcher,dst_addr,payment_id,mixin_count]() {
-        QFuture<PendingTransaction*> future = watcher->future();
-        watcher->deleteLater();
-        emit transactionCreated(future.result(),dst_addr,payment_id,mixin_count);
+    m_scheduler.run([this, dst_addr, payment_id, mixin_count, priority, requestId] {
+        PendingTransaction *tx = createTransactionAll(dst_addr, payment_id, mixin_count, priority);
+        emit transactionCreated(tx, {dst_addr}, payment_id, mixin_count, requestId);
     });
-    watcher->setFuture(future);
 }
 
 PendingTransaction *Wallet::createSweepUnmixableTransaction()
@@ -452,18 +731,12 @@ PendingTransaction *Wallet::createSweepUnmixableTransaction()
     return result;
 }
 
-void Wallet::createSweepUnmixableTransactionAsync()
+void Wallet::createSweepUnmixableTransactionAsync(quint64 requestId)
 {
-    QFuture<PendingTransaction*> future = QtConcurrent::run(this, &Wallet::createSweepUnmixableTransaction);
-    QFutureWatcher<PendingTransaction*> * watcher = new QFutureWatcher<PendingTransaction*>();
-
-    connect(watcher, &QFutureWatcher<PendingTransaction*>::finished,
-            this, [this, watcher]() {
-        QFuture<PendingTransaction*> future = watcher->future();
-        watcher->deleteLater();
-        emit transactionCreated(future.result(),"","",0);
+    m_scheduler.run([this, requestId] {
+        PendingTransaction *tx = createSweepUnmixableTransaction();
+        emit transactionCreated(tx, {""}, "", 0, requestId);
     });
-    watcher->setFuture(future);
 }
 
 UnsignedTransaction * Wallet::loadTxFile(const QString &fileName)
@@ -483,6 +756,14 @@ bool Wallet::submitTxFile(const QString &fileName) const
     return m_walletImpl->importKeyImages(fileName.toStdString() + "_keyImages");
 }
 
+void Wallet::commitTransactionAsync(PendingTransaction *t)
+{
+    m_scheduler.run([this, t] {
+        auto txIdList = t->txid();  // retrieve before commit
+        emit transactionCommitted(t->commit(), t, txIdList);
+    });
+}
+
 void Wallet::disposeTransaction(PendingTransaction *t)
 {
     m_walletImpl->disposeTransaction(t->m_pimpl);
@@ -492,6 +773,34 @@ void Wallet::disposeTransaction(PendingTransaction *t)
 void Wallet::disposeTransaction(UnsignedTransaction *t)
 {
     delete t;
+}
+
+void Wallet::estimateTransactionFeeAsync(
+    const QVector<QString> &destinationAddresses,
+    const QVector<quint64> &amounts,
+    PendingTransaction::Priority priority,
+    const QJSValue &callback)
+{
+    m_scheduler.run(
+        [this, destinationAddresses, amounts, priority] {
+            if (destinationAddresses.size() != amounts.size())
+            {
+                return QJSValueList({""});
+            }
+
+            std::vector<std::pair<std::string, uint64_t>> destinations;
+            destinations.reserve(destinationAddresses.size());
+            for (size_t index = 0; index < destinationAddresses.size(); ++index)
+            {
+                destinations.emplace_back(std::make_pair(destinationAddresses[index].toStdString(), amounts[index]));
+            }
+
+            const uint64_t fee = m_walletImpl->estimateTransactionFee(
+                destinations,
+                static_cast<Monero::PendingTransaction::Priority>(priority));
+            return QJSValueList({QString::fromStdString(Monero::Wallet::displayAmount(fee))});
+        },
+        callback);
 }
 
 TransactionHistory *Wallet::history() const
@@ -507,6 +816,8 @@ TransactionHistorySortFilterModel *Wallet::historyModel() const
         m_historyModel->setTransactionHistory(this->history());
         m_historySortFilterModel = new TransactionHistorySortFilterModel(w);
         m_historySortFilterModel->setSourceModel(m_historyModel);
+        m_historySortFilterModel->setSortRole(TransactionHistoryModel::TransactionBlockHeightRole);
+        m_historySortFilterModel->sort(0, Qt::DescendingOrder);
     }
 
     return m_historySortFilterModel;
@@ -541,6 +852,20 @@ SubaddressModel *Wallet::subaddressModel()
     return m_subaddressModel;
 }
 
+SubaddressAccount *Wallet::subaddressAccount() const
+{
+    return m_subaddressAccount;
+}
+
+SubaddressAccountModel *Wallet::subaddressAccountModel() const
+{
+    if (!m_subaddressAccountModel) {
+        Wallet * w = const_cast<Wallet*>(this);
+        m_subaddressAccountModel = new SubaddressAccountModel(w,m_subaddressAccount);
+    }
+    return m_subaddressAccountModel;
+}
+
 QString Wallet::generatePaymentId() const
 {
     return QString::fromStdString(Monero::Wallet::genPaymentId());
@@ -551,14 +876,13 @@ QString Wallet::integratedAddress(const QString &paymentId) const
     return QString::fromStdString(m_walletImpl->integratedAddress(paymentId.toStdString()));
 }
 
-QString Wallet::paymentId() const
-{
-    return m_paymentId;
+QString Wallet::getCacheAttribute(const QString &key) const {
+    return QString::fromStdString(m_walletImpl->getCacheAttribute(key.toStdString()));
 }
 
-void Wallet::setPaymentId(const QString &paymentId)
+bool Wallet::setCacheAttribute(const QString &key, const QString &val)
 {
-    m_paymentId = paymentId;
+    return m_walletImpl->setCacheAttribute(key.toStdString(), val.toStdString());
 }
 
 bool Wallet::setUserNote(const QString &txid, const QString &note)
@@ -574,6 +898,13 @@ QString Wallet::getUserNote(const QString &txid) const
 QString Wallet::getTxKey(const QString &txid) const
 {
   return QString::fromStdString(m_walletImpl->getTxKey(txid.toStdString()));
+}
+
+void Wallet::getTxKeyAsync(const QString &txid, const QJSValue &callback)
+{
+    m_scheduler.run([this, txid] {
+        return QJSValueList({txid, getTxKey(txid)});
+    }, callback);
 }
 
 QString Wallet::checkTxKey(const QString &txid, const QString &tx_key, const QString &address)
@@ -592,6 +923,13 @@ QString Wallet::getTxProof(const QString &txid, const QString &address, const QS
     if (result.empty())
         result = "error|" + m_walletImpl->errorString();
     return QString::fromStdString(result);
+}
+
+void Wallet::getTxProofAsync(const QString &txid, const QString &address, const QString &message, const QJSValue &callback)
+{
+    m_scheduler.run([this, txid, address, message] {
+        return QJSValueList({txid, getTxProof(txid, address, message)});
+    }, callback);
 }
 
 QString Wallet::checkTxProof(const QString &txid, const QString &address, const QString &message, const QString &signature)
@@ -613,11 +951,38 @@ Q_INVOKABLE QString Wallet::getSpendProof(const QString &txid, const QString &me
     return QString::fromStdString(result);
 }
 
+void Wallet::getSpendProofAsync(const QString &txid, const QString &message, const QJSValue &callback)
+{
+    m_scheduler.run([this, txid, message] {
+        return QJSValueList({txid, getSpendProof(txid, message)});
+    }, callback);
+}
+
 Q_INVOKABLE QString Wallet::checkSpendProof(const QString &txid, const QString &message, const QString &signature) const
 {
     bool good;
     bool success = m_walletImpl->checkSpendProof(txid.toStdString(), message.toStdString(), signature.toStdString(), good);
     std::string result = std::string(success ? "true" : "false") + "|" + std::string(!success ? m_walletImpl->errorString() : good ? "true" : "false");
+    return QString::fromStdString(result);
+}
+
+Q_INVOKABLE QString Wallet::getReserveProof(bool all, quint32 account_index, const QString &amount, const QString &message) const
+{
+    qDebug("Generating reserve proof");
+    const quint64 amountAtomic = Monero::Wallet::amountFromString(amount.toStdString());
+    std::string result = m_walletImpl->getReserveProof(all, account_index, amountAtomic, message.toStdString());
+    if (result.empty())
+        result = "error|" + m_walletImpl->errorString();
+    return QString::fromStdString(result);
+}
+
+Q_INVOKABLE QString Wallet::checkReserveProof(const QString &address, const QString &message, const QString &signature) const
+{
+    bool good;
+    uint64_t total;
+    uint64_t spent;
+    bool success = m_walletImpl->checkReserveProof(address.toStdString(), message.toStdString(), signature.toStdString(), good, total, spent);
+    std::string result = std::string(success ? "true" : "false") + "|" + std::string(good ? "true" : "false") + "|" + QString::number(total).toStdString() + "|" + QString::number(spent).toStdString();
     return QString::fromStdString(result);
 }
 
@@ -640,7 +1005,7 @@ QString Wallet::signMessage(const QString &message, bool filename) const
         file.close();
         return "";
       }
-      std::string signature = m_walletImpl->signMessage(std::string((const char*)data, size));
+      std::string signature = m_walletImpl->signMessage(std::string(reinterpret_cast<const char*>(data), size));
       file.unmap(data);
       file.close();
       return QString::fromStdString(signature);
@@ -659,37 +1024,42 @@ QString Wallet::signMessage(const QString &message, bool filename) const
 
 bool Wallet::verifySignedMessage(const QString &message, const QString &address, const QString &signature, bool filename) const
 {
+  return verifySignedMessageWithDetails(message, address, signature, filename).value("valid").toBool();
+}
+
+QVariantMap Wallet::verifySignedMessageWithDetails(const QString &message, const QString &address, const QString &signature, bool filename) const
+{
   if (filename) {
     QFile file(message);
     uchar *data = NULL;
 
     try {
       if (!file.open(QIODevice::ReadOnly))
-        return false;
+        return messageSignatureResultToVariantMap({});
       quint64 size = file.size();
       if (size == 0) {
         file.close();
-        return m_walletImpl->verifySignedMessage(std::string(), address.toStdString(), signature.toStdString());
+        return messageSignatureResultToVariantMap(m_walletImpl->verifySignedMessageWithDetails(std::string(), address.toStdString(), signature.toStdString()));
       }
       data = file.map(0, size);
       if (!data) {
         file.close();
-        return false;
+        return messageSignatureResultToVariantMap({});
       }
-      bool ret = m_walletImpl->verifySignedMessage(std::string((const char*)data, size), address.toStdString(), signature.toStdString());
+      const QVariantMap result = messageSignatureResultToVariantMap(m_walletImpl->verifySignedMessageWithDetails(std::string(reinterpret_cast<const char*>(data), size), address.toStdString(), signature.toStdString()));
       file.unmap(data);
       file.close();
-      return ret;
+      return result;
     }
     catch (const std::exception &e) {
       if (data)
         file.unmap(data);
       file.close();
-      return false;
+      return messageSignatureResultToVariantMap({});
     }
   }
   else {
-    return m_walletImpl->verifySignedMessage(message.toStdString(), address.toStdString(), signature.toStdString());
+    return messageSignatureResultToVariantMap(m_walletImpl->verifySignedMessageWithDetails(message.toStdString(), address.toStdString(), signature.toStdString()));
   }
 }
 bool Wallet::parse_uri(const QString &uri, QString &address, QString &payment_id, uint64_t &amount, QString &tx_description, QString &recipient_name, QVector<QString> &unknown_parameters, QString &error)
@@ -710,8 +1080,17 @@ bool Wallet::parse_uri(const QString &uri, QString &address, QString &payment_id
    return res;
 }
 
+QString Wallet::make_uri(const QString &address, const QString &amount, const QString &tx_description, const QString &recipient_name) const
+{
+    std::string error;
+    const quint64 amountAtomic = Monero::Wallet::amountFromString(amount.toStdString());
+    return QString::fromStdString(m_walletImpl->make_uri(address.toStdString(), "", amountAtomic, tx_description.toStdString(), recipient_name.toStdString(), error));
+}
+
 bool Wallet::rescanSpent()
 {
+    QMutexLocker locker(&m_asyncMutex);
+
     return m_walletImpl->rescanSpent();
 }
 
@@ -736,46 +1115,6 @@ void Wallet::setWalletCreationHeight(quint64 height)
 QString Wallet::getDaemonLogPath() const
 {
     return QString::fromStdString(m_walletImpl->getDefaultDataDir()) + "/bitmonero.log";
-}
-
-bool Wallet::blackballOutput(const QString &amount, const QString &offset)
-{
-    return m_walletImpl->blackballOutput(amount.toStdString(), offset.toStdString());
-}
-
-bool Wallet::blackballOutputs(const QList<QString> &pubkeys, bool add)
-{
-    std::vector<std::string> std_pubkeys;
-    foreach (const QString &pubkey, pubkeys) {
-        std_pubkeys.push_back(pubkey.toStdString());
-    }
-    return m_walletImpl->blackballOutputs(std_pubkeys, add);
-}
-
-bool Wallet::blackballOutputs(const QString &filename, bool add)
-{
-    QFile file(filename);
-
-    try {
-        if (!file.open(QIODevice::ReadOnly))
-            return false;
-        QList<QString> outputs;
-        QTextStream in(&file);
-        while (!in.atEnd()) {
-            outputs.push_back(in.readLine());
-        }
-        file.close();
-        return blackballOutputs(outputs, add);
-    }
-    catch (const std::exception &e) {
-        file.close();
-        return false;
-    }
-}
-
-bool Wallet::unblackballOutput(const QString &amount, const QString &offset)
-{
-    return m_walletImpl->unblackballOutput(amount.toStdString(), offset.toStdString());
 }
 
 QString Wallet::getRing(const QString &key_image)
@@ -847,52 +1186,71 @@ void Wallet::keyReuseMitigation2(bool mitigation)
     m_walletImpl->keyReuseMitigation2(mitigation);
 }
 
+void Wallet::onWalletPassphraseNeeded(bool on_device)
+{
+    emit this->walletPassphraseNeeded(on_device);
+}
+
+void Wallet::onPassphraseEntered(const QString &passphrase, bool enter_on_device, bool entry_abort)
+{
+    if (m_walletListener != nullptr)
+    {
+        m_walletListener->onPassphraseEntered(passphrase, enter_on_device, entry_abort);
+    }
+}
+
 Wallet::Wallet(Monero::Wallet *w, QObject *parent)
     : QObject(parent)
     , m_walletImpl(w)
-    , m_history(nullptr)
+    , m_history(new TransactionHistory(m_walletImpl->history(), this))
     , m_historyModel(nullptr)
-    , m_addressBook(nullptr)
+    , m_addressBook(new AddressBook(m_walletImpl->addressBook(), this))
     , m_addressBookModel(nullptr)
-    , m_subaddress(nullptr)
-    , m_subaddressModel(nullptr)
     , m_daemonBlockChainHeight(0)
     , m_daemonBlockChainHeightTtl(DAEMON_BLOCKCHAIN_HEIGHT_CACHE_TTL_SECONDS)
     , m_daemonBlockChainTargetHeight(0)
     , m_daemonBlockChainTargetHeightTtl(DAEMON_BLOCKCHAIN_TARGET_HEIGHT_CACHE_TTL_SECONDS)
+    , m_connectionStatus(Wallet::ConnectionStatus_Disconnected)
     , m_connectionStatusTtl(WALLET_CONNECTION_STATUS_CACHE_TTL_SECONDS)
+    , m_disconnected(true)
+    , m_initialized(false)
+    , m_initializing(false)
     , m_currentSubaddressAccount(0)
+    , m_subaddress(new Subaddress(m_walletImpl->subaddress(), this))
+    , m_subaddressModel(nullptr)
+    , m_subaddressAccount(new SubaddressAccount(m_walletImpl->subaddressAccount(), this))
+    , m_subaddressAccountModel(nullptr)
+    , m_refreshNow(false)
+    , m_refreshEnabled(false)
+    , m_refreshing(false)
+    , m_refreshThreadStarted(false)
+    , m_scheduler(this)
 {
-    m_history = new TransactionHistory(m_walletImpl->history(), this);
-    m_addressBook = new AddressBook(m_walletImpl->addressBook(), this);
-    m_subaddress = new Subaddress(m_walletImpl->subaddress(), this);
     m_walletListener = new WalletListenerImpl(this);
     m_walletImpl->setListener(m_walletListener);
-    m_connectionStatus = Wallet::ConnectionStatus_Disconnected;
+    m_currentSubaddressAccount = getCacheAttribute(ATTRIBUTE_SUBADDRESS_ACCOUNT).toUInt();
     // start cache timers
-    m_connectionStatusTime.restart();
-    m_daemonBlockChainHeightTime.restart();
-    m_daemonBlockChainTargetHeightTime.restart();
-    m_initialized = false;
+    m_connectionStatusTime.start();
+    m_daemonBlockChainHeightTime.start();
+    m_daemonBlockChainTargetHeightTime.start();
     m_connectionStatusRunning = false;
     m_daemonUsername = "";
     m_daemonPassword = "";
+
 }
 
 Wallet::~Wallet()
 {
     qDebug("~Wallet: Closing wallet");
-    delete m_addressBook;
-    m_addressBook = NULL;
 
-    delete m_history;
-    m_history = NULL;
-    delete m_addressBook;
-    m_addressBook = NULL;
-    delete m_subaddress;
-    m_subaddress = NULL;
+    pauseRefresh();
+    m_walletImpl->stop();
+    m_scheduler.shutdownWaitForFinished();
+
     //Monero::WalletManagerFactory::getWalletManager()->closeWallet(m_walletImpl);
-    if(status() == Status_Critical)
+    if (m_walletImpl->path().empty())
+        qDebug("Discarding unsaved in-memory wallet");
+    else if(status() == Status_Critical)
         qDebug("Not storing wallet cache");
     else if( m_walletImpl->store(""))
         qDebug("Wallet cache stored successfully");
@@ -903,4 +1261,34 @@ Wallet::~Wallet()
     delete m_walletListener;
     m_walletListener = NULL;
     qDebug("m_walletImpl deleted");
+}
+
+void Wallet::startRefreshThread()
+{
+    const auto future = m_scheduler.run([this] {
+        constexpr const std::chrono::seconds refreshInterval{10};
+        constexpr const std::chrono::milliseconds intervalResolution{100};
+
+        auto last = std::chrono::steady_clock::now();
+        while (!m_scheduler.stopping())
+        {
+            if (m_refreshEnabled)
+            {
+                const auto now = std::chrono::steady_clock::now();
+                const auto elapsed = now - last;
+                if (elapsed >= refreshInterval || m_refreshNow)
+                {
+                    refresh(false);
+                    last = std::chrono::steady_clock::now();
+                    m_refreshNow = false;
+                }
+            }
+
+            std::this_thread::sleep_for(intervalResolution);
+        }
+    });
+    if (!future.first)
+    {
+        throw std::runtime_error("failed to start auto refresh thread");
+    }
 }

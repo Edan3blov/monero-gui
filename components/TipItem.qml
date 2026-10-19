@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2018, The Monero Project
+// Copyright (c) 2014-2024, The Monero Project
 // 
 // All rights reserved.
 // 
@@ -26,8 +26,10 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import QtQuick 2.2
-import QtQuick.Window 2.1
+import QtQuick
+import QtQuick.Window
+
+import "../components" as MoneroComponents
 
 Window {
     property alias text: content.text
@@ -55,10 +57,10 @@ Window {
             anchors.top: parent.bottom
             anchors.left: parent.left
             anchors.leftMargin: 5
-            source: "../images/tip.png"
+            source: "qrc:///images/tip.png"
         }
 
-        Text {
+        MoneroComponents.TextPlain {
             id: content
             anchors.horizontalCenter: parent.horizontalCenter
             y: 6
